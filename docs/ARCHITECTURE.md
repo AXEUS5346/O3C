@@ -4,7 +4,7 @@
 Claude Code (Anthropic Messages API)
         |
         v
-bin/claude-opencode.mjs  (env: base URL, auth token, model, context/output, settings)
+bin/o3c.mjs  (preflight + env: base URL, auth token, model, context/output, settings)
         |
         v
 src/server.mjs  :8787
@@ -20,6 +20,15 @@ dedicated OpenCode service :8791  (build agent, auth copy, workdir)
         v
 OpenCode Zen free models (opencode.ai inference)
 ```
+
+## Preflight
+
+`src/preflight.mjs` checks Node >= 22, OpenCode 2.x, the OpenCode login files and
+Claude Code before the bridge starts. Missing required items print OS-specific
+install commands and stop the launch. `o3c --doctor` runs the same checks with
+versions and bridge status without starting anything; the installer also prints
+the report after installing. A missing OpenCode login is a warning because
+alternate credential sources may exist.
 
 ## Request path
 

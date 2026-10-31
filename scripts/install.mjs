@@ -1,16 +1,25 @@
 #!/usr/bin/env node
 // Cross-platform installer: creates a launcher shim, runtime directories, and
-// checks Node/OpenCode/Claude Code availability without touching their config.
+// checks prerequisites without touching OpenCode or Claude Code config.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dataDir, stateDir } from "../src/paths.mjs";
+import {
+  checkPrerequisites,
+  formatPrerequisites,
+  installGuidance,
+  missingRequired,
+  versionMajor,
+} from "../src/preflight.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const LAUNCHER = path.join(REPO_ROOT, "bin", "claude-opencode.mjs");
-const MARKER = "O3C claude-opencode shim";
+const LAUNCHER = path.join(REPO_ROOT, "bin", "o3c.mjs");
+const MARKER = "O3C o3c shim";
+const COMMAND = "o3c";
+const LEGACY = ["claude-opencode", "claude-opencode.cmd", "claude-opencode.ps1"];
 const VERSION = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
 
 function usage() {
@@ -19,7 +28,7 @@ function usage() {
 Usage: node scripts/install.mjs [options]
 
 Options:
-  --bin-dir <dir>    Where to create the launcher (default: platform bin dir)
+  --bin-dir <dir>    Where to create the o3c launcher (default: platform bin dir)
   --data-dir <dir>   Runtime data directory (auth copy, generated settings)
   --state-dir <dir>  Runtime state directory (logs, pid, usage)
   --force            Replace an unrecognized launcher file (backs it up first)
@@ -91,11 +100,12 @@ function isOurLauncher(file) {
       } catch {
         target = path.resolve(path.dirname(file), fs.readlinkSync(file));
       }
-      return target === LAUNCHER || target.startsWith(`${REPO_ROOT}${path.sep}`) || path.basename(target) === "claude-opencode.mjs";
+      const name = path.basename(target);
+      return target === LAUNCHER || target.startsWith(`${REPO_ROOT}${path.sep}`) || name === "o3c.mjs" || name === "claude-opencode.mjs";
     }
     if (!stat.isFile()) return false;
     const text = fs.readFileSync(file, "utf8").slice(0, 8192);
-    return text.includes(MARKER) || text.includes("claude-opencode.mjs") || text.includes("OpenCode Zen's free models");
+    return text.includes(MARKER) || text.includes("O3C claude-opencode shim") || text.includes("o3c.mjs") || text.includes("claude-opencode.mjs") || text.includes("OpenCode Zen's free models");
   } catch {
     return false;
   }
@@ -105,6 +115,14 @@ function backup(file) {
   const destination = `${file}.bak-${Date.now()}`;
   fs.renameSync(file, destination);
   return destination;
+}
+
+function isDanglingLink(file) {
+  try {
+    return fs.lstatSync(file).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function prepareTarget(file, options) {
@@ -119,14 +137,6 @@ function prepareTarget(file, options) {
   console.log(`install: backed up ${file} -> ${backup(file)}`);
 }
 
-function isDanglingLink(file) {
-  try {
-    return fs.lstatSync(file).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 function writeAtomic(file, content, mode) {
   const temp = path.join(path.dirname(file), `.${path.basename(file)}.tmp-${process.pid}`);
   fs.writeFileSync(temp, content, { mode });
@@ -136,34 +146,6 @@ function writeAtomic(file, content, mode) {
 
 function shQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
-function installUnix(binDir, options) {
-  const target = path.join(binDir, "claude-opencode");
-  prepareTarget(target, options);
-  fs.chmodSync(LAUNCHER, 0o755);
-  try {
-    fs.symlinkSync(LAUNCHER, target, "file");
-  } catch {
-    writeAtomic(target, `#!/bin/sh\n# ${MARKER}\nexec ${shQuote(process.execPath)} ${shQuote(LAUNCHER)} "$@"\n`, 0o755);
-  }
-  return target;
-}
-
-function installWindows(binDir, options) {
-  const node = process.execPath;
-  const files = {
-    "claude-opencode.cmd": `@echo off\r\nrem ${MARKER}\r\n"${node}" "${LAUNCHER}" %*\r\n`,
-    "claude-opencode.ps1": `# ${MARKER}\r\n& "${node}" "${LAUNCHER}" @args\r\nexit $LASTEXITCODE\r\n`,
-    "claude-opencode": `#!/bin/sh\n# ${MARKER}\nexec "${node.replace(/\\/g, "/")}" "${LAUNCHER.replace(/\\/g, "/")}" "$@"\n`,
-  };
-  for (const [name, content] of Object.entries(files)) {
-    const target = path.join(binDir, name);
-    prepareTarget(target, options);
-    const mode = name === "claude-opencode" ? 0o755 : 0o644;
-    writeAtomic(target, content, mode);
-  }
-  return path.join(binDir, "claude-opencode.cmd");
 }
 
 function removeIfOurs(file) {
@@ -177,11 +159,41 @@ function removeIfOurs(file) {
   return true;
 }
 
+function installUnix(binDir, options) {
+  const target = path.join(binDir, COMMAND);
+  prepareTarget(target, options);
+  fs.chmodSync(LAUNCHER, 0o755);
+  try {
+    fs.symlinkSync(LAUNCHER, target, "file");
+  } catch {
+    writeAtomic(target, `#!/bin/sh\n# ${MARKER}\nexec ${shQuote(process.execPath)} ${shQuote(LAUNCHER)} "$@"\n`, 0o755);
+  }
+  for (const name of LEGACY) removeIfOurs(path.join(binDir, name));
+  return target;
+}
+
+function installWindows(binDir, options) {
+  const node = process.execPath;
+  const files = {
+    [`${COMMAND}.cmd`]: `@echo off\r\nrem ${MARKER}\r\n"${node}" "${LAUNCHER}" %*\r\n`,
+    [`${COMMAND}.ps1`]: `# ${MARKER}\r\n& "${node}" "${LAUNCHER}" @args\r\nexit $LASTEXITCODE\r\n`,
+    [COMMAND]: `#!/bin/sh\n# ${MARKER}\nexec "${node.replace(/\\/g, "/")}" "${LAUNCHER.replace(/\\/g, "/")}" "$@"\n`,
+  };
+  for (const [name, content] of Object.entries(files)) {
+    const target = path.join(binDir, name);
+    prepareTarget(target, options);
+    const mode = name === COMMAND ? 0o755 : 0o644;
+    writeAtomic(target, content, mode);
+  }
+  for (const name of LEGACY) removeIfOurs(path.join(binDir, name));
+  return path.join(binDir, `${COMMAND}.cmd`);
+}
+
 function uninstall(options) {
   const binDir = path.resolve(options.binDir || defaultBinDir());
   const names = process.platform === "win32"
-    ? ["claude-opencode", "claude-opencode.cmd", "claude-opencode.ps1"]
-    : ["claude-opencode"];
+    ? [COMMAND, `${COMMAND}.cmd`, `${COMMAND}.ps1`, ...LEGACY]
+    : [COMMAND, ...LEGACY];
   for (const name of names) removeIfOurs(path.join(binDir, name));
   console.log(`O3C launcher removed from ${binDir}`);
   console.log("Data and state directories were kept:");
@@ -198,30 +210,16 @@ function onPath(dir) {
   return (process.env.PATH || "").split(path.delimiter).some((entry) => entry && normalize(entry) === target);
 }
 
-function findExecutable(name) {
-  let names = [name];
-  if (process.platform === "win32") {
-    const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
-    names = path.extname(name) ? [name] : extensions.map((ext) => `${name}${ext.toLowerCase()}`);
-  }
-  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    if (!dir) continue;
-    for (const candidate of names) {
-      try {
-        if (fs.statSync(path.join(dir, candidate)).isFile()) return path.join(dir, candidate);
-      } catch {}
-    }
-  }
-  return null;
-}
-
 function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) return usage();
   if (options.version) return console.log(VERSION);
 
-  const major = Number(process.versions.node.split(".")[0]);
-  if (major < 22) fail(`Node.js >= 22 is required (found ${process.version})`);
+  if (versionMajor(process.versions.node) < 22) {
+    console.error(`install: Node.js 22 or newer is required (found ${process.version}).`);
+    for (const line of installGuidance("node", { platform: process.platform })) console.error(`  ${line}`);
+    process.exit(1);
+  }
 
   if (options.dataDir) process.env.OPENCODE_FREE_DATA_DIR = path.resolve(options.dataDir);
   if (options.stateDir) process.env.OPENCODE_FREE_STATE_DIR = path.resolve(options.stateDir);
@@ -245,16 +243,24 @@ function main() {
 
   const shim = process.platform === "win32" ? installWindows(binDir, options) : installUnix(binDir, options);
 
-  const missing = [];
-  if (!findExecutable("opencode")) missing.push("opencode (OpenCode CLI)");
-  if (!findExecutable("claude")) missing.push("claude (Claude Code)");
-  if (missing.length) console.error(`install: warning: not found on PATH: ${missing.join(", ")}`);
-
   console.log(`O3C ${VERSION} installed`);
   console.log(`  launcher: ${shim}`);
   console.log(`  source:   ${REPO_ROOT}`);
   console.log(`  data:     ${dataDir()}`);
   console.log(`  state:    ${stateDir()}`);
+
+  const checks = checkPrerequisites();
+  console.log(`\n${formatPrerequisites(checks)}`);
+  if (!missingRequired(checks).length) {
+    console.log(`
+Next:
+  ${COMMAND} --list
+  ${COMMAND} -m deepseek -p "Reply with exactly OK"
+`);
+  } else {
+    console.log(`\nO3C is installed, but fix the MISSING items above, then run: ${COMMAND} --doctor`);
+  }
+
   if (!onPath(binDir)) {
     console.log(`\nAdd ${binDir} to PATH:`);
     if (process.platform === "win32") {
@@ -263,11 +269,17 @@ function main() {
       console.log(`  export PATH="${binDir}:$PATH"   (add to your shell profile)`);
     }
   }
-  console.log(`
-Next:
-  claude-opencode --list
-  claude-opencode -m deepseek -p "Reply with exactly OK"
-`);
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(`install: ${error.message}`);
+  if (error.code === "EACCES" || error.code === "EPERM") {
+    console.error("Choose a writable launcher directory, for example:");
+    console.error("  npm run install:o3c -- --bin-dir <writable-directory>");
+  } else {
+    console.error("Run: node scripts/install.mjs --help");
+  }
+  process.exit(1);
+}

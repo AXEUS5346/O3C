@@ -18,8 +18,20 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 
 - Linux, macOS, or Windows 10/11
 - Node.js **>= 22**
-- `opencode` (v2.1.x) with a logged-in OpenCode account
+- OpenCode **2.x** (`opencode` v2.1.4 verified) with a logged-in OpenCode account
 - Claude Code (`claude`)
+
+## Check prerequisites
+
+```bash
+o3c --doctor
+```
+
+The doctor checks Node, OpenCode 2.x, your OpenCode login and Claude Code. It
+prints the exact install command for your OS and exits non-zero while a required
+item is missing. Every normal launch runs the same preflight: it stops with the
+same instructions instead of failing later inside the bridge. A missing
+OpenCode login is shown as a warning with `opencode auth login` guidance.
 
 ## Install
 
@@ -27,12 +39,13 @@ Install globally from the public repository (Linux, macOS, Windows):
 
 ```bash
 npm install -g github:AXEUS5346/O3C
-claude-opencode --list
+o3c --list
 ```
 
-No clone or extra installer step is needed: npm creates the `claude-opencode`
-command, and the launcher creates its data/state directories on first use.
-Re-run the same command to update.
+No clone or extra installer step is needed: npm creates the `o3c` command, and
+the launcher creates its data/state directories on first use. Re-run the same
+command to update. An existing `claude-opencode` shim from an older release is
+migrated automatically by the source installer.
 
 Source checkout (development or custom bin/data/state directories):
 
@@ -47,8 +60,8 @@ PowerShell and cmd.exe. It creates a launcher shim in the platform bin directory
 
 | OS | default bin dir | shim |
 |---|---|---|
-| Linux | `${XDG_BIN_HOME:-~/.local/bin}` | symlink to `bin/claude-opencode.mjs` |
-| macOS | `${XDG_BIN_HOME:-~/.local/bin}` | symlink to `bin/claude-opencode.mjs` |
+| Linux | `${XDG_BIN_HOME:-~/.local/bin}` | symlink to `bin/o3c.mjs` |
+| macOS | `${XDG_BIN_HOME:-~/.local/bin}` | symlink to `bin/o3c.mjs` |
 | Windows | `npm prefix -g` (usually `%APPDATA%\npm`) | `.cmd`, `.ps1` and POSIX sh shims |
 
 Options:
@@ -78,11 +91,12 @@ Platform data locations:
 ## Quick start
 
 ```bash
-claude-opencode --list                    # refresh + list current free models
-claude-opencode -m deepseek -p "hello"    # one-shot
-claude-opencode -m glm                    # interactive
-claude-opencode --status                  # bridge, transport, catalog, usage
-claude-opencode --stop
+o3c --doctor                              # check prerequisites and get fixes
+o3c --list                                # refresh + list current free models
+o3c -m deepseek -p "hello"                # one-shot
+o3c -m glm                                # interactive
+o3c --status                              # bridge, transport, catalog, usage
+o3c --stop
 ```
 
 The first launch starts a dedicated OpenCode service in the background. Your
@@ -229,13 +243,15 @@ smoke sparingly after a quota reset.
 ## Repo layout
 
 ```text
-bin/claude-opencode.mjs      cross-platform Node launcher
+bin/o3c.mjs                  cross-platform launcher + preflight
 src/server.mjs               bridge, transport, streaming, catalog, budget
 src/paths.mjs                platform data/state/bin path resolution
+src/preflight.mjs            prerequisite checks and OS install guidance
 scripts/install.mjs          npm installer and shim generator
 scripts/install.sh           Unix compatibility wrapper
+test/preflight.test.mjs      prerequisite and guidance tests
 test/translate.test.mjs      unit tests
-test/install.test.mjs        installer tests (all OSes)
+test/install.test.mjs        installer and doctor tests (all OSes)
 test/mock-upstream.mjs       OpenAI-compatible mock (direct transport)
 test/mock-opencode-service.mjs  OpenCode service mock
 test/e2e.sh                  direct-transport E2E
@@ -271,7 +287,7 @@ runtime with mode 0600; no secrets belong in the repository.
 ## Uninstall
 
 ```bash
-claude-opencode --stop
+o3c --stop
 npm uninstall -g o3c                      # global install
 npm run install:o3c -- --uninstall        # source checkout shim
 ```

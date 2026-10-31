@@ -46,7 +46,7 @@ cat "$WORK/text.out"
 grep -q "PONG" "$WORK/text.out" || { echo "FAIL: no PONG"; tail -20 "$WORK/text.err"; exit 1; }
 
 echo "== test 2: tool call round-trip =="
-printf 'hello from the bridge e2e test\n' > /tmp/claude-opencode-test.txt
+printf 'hello from the bridge e2e test\n' > /tmp/o3c-test.txt
 timeout 150 claude -p "tooltest" --model beam-free --allowedTools "Read" >"$WORK/tool.out" 2>"$WORK/tool.err"
 cat "$WORK/tool.out"
 grep -q "TOOL_RESULT_SEEN" "$WORK/tool.out" || { echo "FAIL: no tool round-trip"; tail -30 "$WORK/tool.err"; exit 1; }

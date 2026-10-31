@@ -20,13 +20,14 @@ jobs:
         run: |
           node --check src/server.mjs
           node --check src/paths.mjs
-          node --check bin/claude-opencode.mjs
+          node --check bin/o3c.mjs
+          node --check src/preflight.mjs
           node --check scripts/install.mjs
           bash -n scripts/install.sh test/e2e.sh test/e2e-service.sh test/e2e-launcher.sh test/live-smoke.sh
       - name: Unit tests
         env:
           XDG_STATE_HOME: ${{ runner.temp }}/state
-        run: node --test test/translate.test.mjs test/install.test.mjs
+        run: npm test
 
   cross-platform-install:
     strategy:
@@ -42,4 +43,4 @@ jobs:
       - name: Unit and install tests
         env:
           XDG_STATE_HOME: ${{ runner.temp }}/state
-        run: node --test test/translate.test.mjs test/install.test.mjs
+        run: npm test

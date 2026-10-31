@@ -3,7 +3,7 @@
 import http from "node:http";
 
 const PORT = Number(process.env.MOCK_PORT || 8990);
-const FILE = "/tmp/claude-opencode-test.txt";
+const FILE = "/tmp/o3c-test.txt";
 
 function sse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);

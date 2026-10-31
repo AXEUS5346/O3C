@@ -8,12 +8,14 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(REPO_ROOT, "scripts", "install.mjs");
-const LAUNCHER = path.join(REPO_ROOT, "bin", "claude-opencode.mjs");
+const LAUNCHER = path.join(REPO_ROOT, "bin", "o3c.mjs");
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "o3c-install-"));
 const BIN = path.join(ROOT, "bin");
 const DATA = path.join(ROOT, "data");
 const STATE = path.join(ROOT, "state");
-const shimName = process.platform === "win32" ? "claude-opencode.cmd" : "claude-opencode";
+const EMPTY = path.join(ROOT, "empty");
+const HOME = path.join(ROOT, "home");
+const shimName = process.platform === "win32" ? "o3c.cmd" : "o3c";
 const shim = path.join(BIN, shimName);
 
 function install(args = [], extraEnv = {}) {
@@ -37,18 +39,28 @@ test.after(() => {
   fs.rmSync(ROOT, { recursive: true, force: true });
 });
 
-test("installer is idempotent and creates a working launcher", () => {
+test("installer is idempotent, migrates the old command, and works", () => {
+  fs.mkdirSync(BIN, { recursive: true });
+  const legacy = path.join(BIN, process.platform === "win32" ? "claude-opencode.cmd" : "claude-opencode");
+  if (process.platform === "win32") {
+    fs.writeFileSync(legacy, "@echo off\r\nrem O3C claude-opencode shim\r\n\"node\" \"claude-opencode.mjs\" %*\r\n");
+  } else {
+    fs.symlinkSync(LAUNCHER, legacy, "file");
+  }
+
   const first = install();
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /O3C \d+\.\d+\.\d+ installed/);
   assert.match(first.stdout, /launcher:/);
+  assert.match(first.stdout, /Prerequisite check:/);
   assert.ok(fs.existsSync(DATA));
   assert.ok(fs.existsSync(STATE));
+  assert.ok(!fs.existsSync(legacy), "legacy claude-opencode shim was not removed");
 
   if (process.platform === "win32") {
     assert.ok(fs.existsSync(shim));
-    assert.ok(fs.existsSync(path.join(BIN, "claude-opencode.ps1")));
-    assert.match(fs.readFileSync(shim, "utf8"), /O3C claude-opencode shim/);
+    assert.ok(fs.existsSync(path.join(BIN, "o3c.ps1")));
+    assert.match(fs.readFileSync(shim, "utf8"), /O3C o3c shim/);
   } else {
     const stat = fs.lstatSync(shim);
     assert.ok(stat.isSymbolicLink());
@@ -65,12 +77,80 @@ test("installer is idempotent and creates a working launcher", () => {
 test("installed shim runs the launcher without starting the bridge", () => {
   const help = runShim(["--help"]);
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /Usage: claude-opencode/);
-  assert.match(help.stdout, /dynamic/);
+  assert.match(help.stdout, /Usage: o3c/);
+  assert.match(help.stdout, /--doctor/);
 
   const log = runShim(["--log"]);
   assert.equal(log.status, 0, log.stderr);
   assert.equal(log.stdout.trim(), path.join(STATE, "bridge.log"));
+});
+
+test("doctor explains missing prerequisites and how to install them", () => {
+  fs.mkdirSync(EMPTY, { recursive: true });
+  fs.mkdirSync(HOME, { recursive: true });
+  const env = {
+    ...process.env,
+    PATH: EMPTY,
+    HOME,
+    USERPROFILE: HOME,
+    XDG_DATA_HOME: path.join(HOME, ".local", "share"),
+    LOCALAPPDATA: path.join(HOME, "local-app-data"),
+    APPDATA: path.join(HOME, "app-data"),
+    OPENCODE_FREE_DATA_DIR: DATA,
+    OPENCODE_FREE_STATE_DIR: STATE,
+    OPENCODE_FREE_PORT: "8799",
+  };
+  delete env.OPENCODE_BIN;
+  delete env.CLAUDE_BIN;
+
+  const result = spawnSync(process.execPath, [LAUNCHER, "--doctor"], { encoding: "utf8", env, windowsHide: true });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 1, output);
+  assert.match(output, /\[OK\s*\] Node\.js 22\+/);
+  assert.match(output, /\[MISSING\] OpenCode 2\.x/);
+  assert.match(output, /\[MISSING\] Claude Code/);
+  assert.match(output, /https:\/\/opencode\.ai/);
+  assert.match(output, /claude\.ai\/install/);
+  assert.match(output, /opencode auth login/);
+  assert.match(output, /o3c --doctor/);
+});
+
+test("doctor reports a complete environment and next step", () => {
+  const tools = path.join(ROOT, "tools");
+  const authData = path.join(ROOT, "auth-data");
+  fs.mkdirSync(tools, { recursive: true });
+  fs.mkdirSync(path.join(authData, "opencode"), { recursive: true });
+  fs.writeFileSync(path.join(authData, "opencode", "auth.json"), "{}");
+  for (const [name, version] of [["opencode", "2.1.4"], ["claude", "2.1.284"]]) {
+    const file = path.join(tools, process.platform === "win32" ? `${name}.cmd` : name);
+    fs.writeFileSync(file, process.platform === "win32" ? `@echo off\r\necho ${version}\r\n` : `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+    fs.chmodSync(file, 0o755);
+  }
+  const env = {
+    ...process.env,
+    PATH: tools,
+    PATHEXT: ".COM;.EXE;.BAT;.CMD",
+    HOME,
+    USERPROFILE: HOME,
+    XDG_DATA_HOME: authData,
+    LOCALAPPDATA: path.join(HOME, "local-app-data"),
+    APPDATA: path.join(HOME, "app-data"),
+    OPENCODE_FREE_DATA_DIR: DATA,
+    OPENCODE_FREE_STATE_DIR: STATE,
+    OPENCODE_FREE_PORT: "8799",
+  };
+  delete env.OPENCODE_BIN;
+  delete env.CLAUDE_BIN;
+
+  const result = spawnSync(process.execPath, [LAUNCHER, "--doctor"], { encoding: "utf8", env, windowsHide: true });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 0, output);
+  assert.match(output, /\[OK\s*\] OpenCode 2\.x/);
+  assert.match(output, /\(v2\.1\.4\)/);
+  assert.match(output, /\[OK\s*\] Claude Code/);
+  assert.match(output, /\(v2\.1\.284\)/);
+  assert.match(output, /\[OK\s*\] OpenCode login/);
+  assert.match(output, /Next: o3c --list/);
 });
 
 test("installer refuses an unknown launcher unless forced, then backs it up", () => {
@@ -95,7 +175,7 @@ test("uninstall removes the shim and keeps runtime data", () => {
   assert.match(removed.stdout, /launcher removed/);
   assert.ok(!fs.existsSync(shim));
   if (process.platform === "win32") {
-    assert.ok(!fs.existsSync(path.join(BIN, "claude-opencode.ps1")));
+    assert.ok(!fs.existsSync(path.join(BIN, "o3c.ps1")));
   }
   assert.ok(fs.existsSync(DATA));
   assert.ok(fs.existsSync(STATE));

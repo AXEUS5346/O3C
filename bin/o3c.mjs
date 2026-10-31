@@ -6,6 +6,13 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dataDir, stateDir, settingsPath, logPath, bridgeUrl, port } from "../src/paths.mjs";
+import {
+  checkPrerequisites,
+  findExecutable,
+  formatPrerequisites,
+  installGuidance,
+  missingRequired,
+} from "../src/preflight.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(REPO_ROOT, "src", "server.mjs");
@@ -18,17 +25,19 @@ const SETTINGS_FILE = settingsPath();
 const PID_FILE = path.join(STATE_DIR, "bridge.pid");
 const SERVICE_STATE = path.join(STATE_DIR, "opencode-service.json");
 const DEFAULT_BEHAVES_AS = process.env.OPENCODE_FREE_BEHAVES_AS || "claude-opus-4-8";
+const PREFIX = "o3c";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function usage() {
-  console.log(`Usage: claude-opencode [options] [--] [claude args...]
+  console.log(`Usage: o3c [options] [--] [claude args...]
 
 Options:
   -m, --model <name>   Model alias or full ID (default: bridge default)
   -l, --list           Refresh and list current free OpenCode models
+      --doctor         Check Node, OpenCode, login and Claude Code, with fixes
       --status         Show bridge, transport and catalog status
       --stop           Stop the bridge and its dedicated OpenCode service
       --log            Print the bridge log path
@@ -40,8 +49,12 @@ Anything after -- (or any unrecognized leading arg) is passed to Claude Code.`);
 }
 
 function fail(message, code = 1) {
-  console.error(`claude-opencode: ${message}`);
+  console.error(`${PREFIX}: ${message}`);
   process.exit(code);
+}
+
+function needsOpenCode() {
+  return (process.env.OPENCODE_FREE_TRANSPORT || "service").toLowerCase() !== "direct";
 }
 
 async function getJson(url, timeout = 2000) {
@@ -66,6 +79,21 @@ function logTail(lines = 20) {
   } catch {
     return "";
   }
+}
+
+function bridgeHints(tail) {
+  const hints = [];
+  if (/already in use|EADDRINUSE/i.test(tail)) {
+    hints.push(`Port ${PORT} is busy. Run: o3c --stop, or set OPENCODE_FREE_PORT to another port.`);
+  }
+  if (/auth|login|unauthorized|forbidden|401|403/i.test(tail)) {
+    hints.push("OpenCode may not be logged in. Run: opencode auth login, then: o3c --doctor");
+  }
+  if (/FreeUsageLimit|free usage limit/i.test(tail)) {
+    hints.push("The OpenCode free allowance is exhausted. Try another free model or wait for the reset.");
+  }
+  if (!hints.length) hints.push("Run: o3c --doctor");
+  return hints;
 }
 
 async function startBridge() {
@@ -102,11 +130,12 @@ async function startBridge() {
     await sleep(100);
   }
   const tail = logTail();
-  fail(`bridge failed to start on port ${PORT}; see ${LOG}${tail ? `\n${tail}` : ""}`);
+  const hints = bridgeHints(tail);
+  fail(`bridge failed to start on port ${PORT}; see ${LOG}${tail ? `\n\n${tail}` : ""}\n\n${hints.join("\n")}`);
 }
 
 async function fetchCatalog(force) {
-  const expectService = (process.env.OPENCODE_FREE_TRANSPORT || "service").toLowerCase() === "service";
+  const expectService = needsOpenCode();
   let last = null;
   if (force) {
     try {
@@ -149,6 +178,7 @@ function printCatalog(catalog) {
   }
   if (catalog.source !== "service") {
     console.log("note: live catalog was not ready; showing the fallback list.");
+    console.log("      Run: o3c --doctor");
   }
 }
 
@@ -165,9 +195,9 @@ function resolveRequested(catalog, requested) {
       (entry.aliases || []).some((alias) => String(alias).toLowerCase() === wanted));
   }
   if (!model) {
-    console.error(`claude-opencode: model "${requested}" is not in the current free catalog.`);
+    console.error(`${PREFIX}: model "${requested}" is not in the current free catalog.`);
     console.error(`Available: ${data.map((entry) => `${entry.alias || entry.id} (${entry.id})`).join(", ")}`);
-    console.error("Run: claude-opencode --list");
+    console.error("Run: o3c --list");
     process.exit(2);
   }
   return model;
@@ -251,7 +281,7 @@ async function stopAll() {
   if (service && ownsPid(service, ["serve"])) await killPid(service);
   fs.rmSync(PID_FILE, { force: true });
   fs.rmSync(SERVICE_STATE, { force: true });
-  console.log("claude-opencode stopped");
+  console.log(`${PREFIX} stopped`);
 }
 
 function quoteWindowsArg(value) {
@@ -261,25 +291,12 @@ function quoteWindowsArg(value) {
   return `"${text.replace(/(\\*)"/g, "$1$1\\\"").replace(/(\\+)$/, "$1$1")}"`;
 }
 
-function findOnWindows(name) {
-  const extensions = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
-  const names = path.extname(name) ? [name] : extensions.map((extension) => `${name}${extension.toLowerCase()}`);
-  for (const dir of (process.env.PATH || "").split(";")) {
-    if (!dir) continue;
-    for (const candidate of names) {
-      const full = path.join(dir, candidate);
-      try {
-        if (fs.statSync(full).isFile()) return full;
-      } catch {}
-    }
-  }
-  return null;
-}
-
 function claudeSpawnSpec(args) {
-  if (process.platform !== "win32") return { command: "claude", args };
-  const command = findOnWindows("claude");
-  if (!command) fail("'claude' (Claude Code) was not found on PATH", 127);
+  if (process.platform !== "win32") return { command: "claude", args, shell: false };
+  const command = findExecutable(process.env.CLAUDE_BIN || "claude", { env: process.env, platform: process.platform });
+  if (!command) {
+    fail(`Claude Code was not found on PATH.\n${installGuidance("claude", { platform: process.platform }).join("\n")}`, 127);
+  }
   if (/\.(exe|com)$/i.test(command)) return { command, args, shell: false };
   const line = `"${command}" ${args.map(quoteWindowsArg).join(" ")}`;
   return { command: line, args: [], shell: true };
@@ -304,11 +321,48 @@ async function launchClaude(model, args) {
       CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(model.max_output_tokens || 32000),
     },
   });
-  child.on("error", (error) => fail(`could not start claude: ${error.message}`, 127));
+  child.on("error", (error) => {
+    const fix = installGuidance("claude", { platform: process.platform }).join("\n");
+    fail(`could not start Claude Code: ${error.message}\n${fix}`, 127);
+  });
   const code = await new Promise((resolve) => {
     child.on("exit", (exitCode, signal) => resolve(exitCode ?? (signal ? 1 : 0)));
   });
   process.exit(code);
+}
+
+function preflight({ needClaude }) {
+  const checks = checkPrerequisites({
+    needOpenCode: needsOpenCode(),
+    needClaude,
+  });
+  if (missingRequired(checks).length || checks.some((check) => !check.required && !check.ok)) {
+    console.error(formatPrerequisites(checks));
+  }
+  if (missingRequired(checks).length) process.exit(1);
+}
+
+async function doctor() {
+  const checks = checkPrerequisites({
+    needOpenCode: needsOpenCode(),
+    needClaude: true,
+    detailed: true,
+  });
+  console.log("O3C doctor");
+  console.log(`  platform: ${process.platform} ${process.arch}`);
+  console.log(`  node:     ${process.version}`);
+  console.log(`  data:     ${DATA_DIR}`);
+  console.log(`  state:    ${STATE_DIR}`);
+  console.log("");
+  console.log(formatPrerequisites(checks));
+  const running = await bridgeHealthy(2000);
+  console.log("");
+  console.log(running ? `Bridge: running at ${BASE}` : "Bridge: not running (starts on first launch)");
+  if (running) console.log(`Log:    ${LOG}`);
+  if (!missingRequired(checks).length) {
+    console.log("\nNext: o3c --list");
+  }
+  return missingRequired(checks).length ? 1 : 0;
 }
 
 async function main() {
@@ -334,9 +388,13 @@ async function main() {
       continue;
     }
     if (arg === "-l" || arg === "--list") {
+      preflight({ needClaude: false });
       await startBridge();
       printCatalog(requireCatalog(await fetchCatalog(true)));
       return;
+    }
+    if (arg === "--doctor") {
+      process.exit(await doctor());
     }
     if (arg === "--log") {
       console.log(LOG);
@@ -355,6 +413,7 @@ async function main() {
       } catch {
         console.error(`bridge not running on port ${PORT}`);
         console.error(`log: ${LOG}`);
+        console.error("Run: o3c --doctor");
         process.exit(1);
       }
     }
@@ -366,12 +425,22 @@ async function main() {
     break;
   }
 
+  preflight({ needClaude: true });
   await startBridge();
   const catalog = requireCatalog(await fetchCatalog(true));
   const model = resolveRequested(catalog, requested);
   writeSettings(catalog);
-  console.error(`[claude-opencode] model=${model.alias || model.id} (${model.id}) ctx=${model.context_window} out=${model.max_output_tokens} bridge=${BASE}`);
+  console.error(`[${PREFIX}] model=${model.alias || model.id} (${model.id}) ctx=${model.context_window} out=${model.max_output_tokens} bridge=${BASE}`);
   await launchClaude(model, ["--settings", SETTINGS_FILE, "--model", model.id, ...passthrough]);
 }
 
-main().catch((error) => fail(error && error.message ? error.message : String(error)));
+main().catch((error) => {
+  const message = error && error.message ? error.message : String(error);
+  console.error(`${PREFIX}: ${message}`);
+  if (/EACCES|EPERM/.test(message)) {
+    console.error("Check permissions for the data/state directories, or set OPENCODE_FREE_DATA_DIR and OPENCODE_FREE_STATE_DIR.");
+  } else {
+    console.error("Run: o3c --doctor");
+  }
+  process.exit(1);
+});

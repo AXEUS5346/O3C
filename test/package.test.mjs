@@ -34,8 +34,8 @@ test("the packed npm tarball installs globally and runs", () => {
   assert.equal(install.status, 0, install.stderr);
 
   const shim = process.platform === "win32"
-    ? path.join(PREFIX, "claude-opencode.cmd")
-    : path.join(PREFIX, "bin", "claude-opencode");
+    ? path.join(PREFIX, "o3c.cmd")
+    : path.join(PREFIX, "bin", "o3c");
   assert.ok(fs.existsSync(shim), `missing shim: ${shim}`);
 
   const env = {
@@ -47,7 +47,7 @@ test("the packed npm tarball installs globally and runs", () => {
     ? spawnSync(`"${shim}" --help`, { shell: true, encoding: "utf8", env, windowsHide: true })
     : spawnSync(shim, ["--help"], { encoding: "utf8", env, windowsHide: true });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /Usage: claude-opencode/);
+  assert.match(help.stdout, /Usage: o3c/);
 
   const packageRoot = [
     path.join(PREFIX, "node_modules", "o3c"),

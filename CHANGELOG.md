@@ -1,9 +1,20 @@
 # Changelog
 
+## 0.3.0
+
+- Rename the command from `claude-opencode` to `o3c`; the installer migrates an
+  old shim automatically.
+- Add `o3c --doctor` and launch preflight checks for Node 22+, OpenCode 2.x,
+  OpenCode login and Claude Code.
+- Print OS-specific install commands when a prerequisite is missing, including
+  Windows, macOS and Linux guidance.
+- Add friendly installer and startup errors for permissions, busy ports, login
+  and quota failures.
+
 ## 0.2.0
 
-- Cross-platform Node launcher (`bin/claude-opencode.mjs`) for Linux, macOS and
-  Windows, with cmd.exe quoting and process-tree cleanup.
+- Cross-platform Node launcher for Linux, macOS and Windows, with cmd.exe
+  quoting and process-tree cleanup.
 - `npm run install:o3c` installer with `--bin-dir`, `--data-dir`,
   `--state-dir`, `--force` and `--uninstall`.
 - Windows `.cmd`, `.ps1` and POSIX sh shims; Unix symlink with wrapper fallback.
