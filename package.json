@@ -9,9 +9,10 @@
   "scripts": {
     "start": "node src/server.mjs",
     "install:o3c": "node scripts/install.mjs",
-    "test": "node --test test/translate.test.mjs test/install.test.mjs",
+    "test": "node --test test/translate.test.mjs test/install.test.mjs test/package.test.mjs",
     "test:translate": "node --test test/translate.test.mjs",
     "test:install": "node --test test/install.test.mjs",
+    "test:package": "node --test test/package.test.mjs",
     "test:direct": "bash test/e2e.sh",
     "test:service": "bash test/e2e-service.sh",
     "test:launcher": "bash test/e2e-launcher.sh",

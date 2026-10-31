@@ -12,6 +12,7 @@ WORK="$ROOT/work"
 BRIDGE_PORT="${MOCK_BRIDGE_PORT:-8796}"
 MOCK_PORT="${MOCK_SERVICE_PORT:-8797}"
 MOCK_PID=""
+LAUNCHER="${O3C_LAUNCHER_BIN:-$BIN/claude-opencode}"
 mkdir -p "$WORK"
 
 export OPENCODE_FREE_DATA_DIR="$DATA"
@@ -23,8 +24,8 @@ export OPENCODE_FREE_SERVICE_PASSWORD=mock
 export OPENCODE_FREE_DAILY_BUDGET=40
 
 stop_bridge() {
-  if [ -x "$BIN/claude-opencode" ] || [ -f "$BIN/claude-opencode.cmd" ]; then
-    "$BIN/claude-opencode" --stop >/dev/null 2>&1 || true
+  if [ -x "$LAUNCHER" ] || [ -f "$LAUNCHER.cmd" ]; then
+    "$LAUNCHER" --stop >/dev/null 2>&1 || true
   fi
 }
 
@@ -36,7 +37,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== install =="
-node "$DIR/scripts/install.mjs" --bin-dir "$BIN" --data-dir "$DATA" --state-dir "$STATE"
+if [ -z "${O3C_LAUNCHER_BIN:-}" ]; then
+  node "$DIR/scripts/install.mjs" --bin-dir "$BIN" --data-dir "$DATA" --state-dir "$STATE"
+else
+  echo "using external launcher: $LAUNCHER"
+fi
 
 MOCK_SERVICE_PORT="$MOCK_PORT" node "$DIR/test/mock-opencode-service.mjs" 2>"$ROOT/mock.log" &
 MOCK_PID=$!
@@ -46,7 +51,7 @@ for _ in $(seq 1 100); do
 done
 
 echo "== launcher dynamic catalog =="
-"$BIN/claude-opencode" --list >"$ROOT/list.out" 2>"$ROOT/list.err"
+"$LAUNCHER" --list >"$ROOT/list.out" 2>"$ROOT/list.err"
 cat "$ROOT/list.out"
 grep -q "mock-deepseek-free" "$ROOT/list.out"
 grep -q "mock-glm-free" "$ROOT/list.out"
@@ -59,7 +64,7 @@ fi
 echo "== catalog updates every invocation =="
 curl -fsS "http://127.0.0.1:$MOCK_PORT/control/add-model" >/dev/null
 curl -fsS "http://127.0.0.1:$MOCK_PORT/control/bump-context" >/dev/null
-"$BIN/claude-opencode" --list >"$ROOT/list2.out" 2>"$ROOT/list2.err"
+"$LAUNCHER" --list >"$ROOT/list2.out" 2>"$ROOT/list2.err"
 cat "$ROOT/list2.out"
 grep -q "mock-new-free" "$ROOT/list2.out"
 grep -q "111,111" "$ROOT/list2.out"
@@ -67,13 +72,13 @@ grep -q "123,000" "$ROOT/list2.out"
 
 cd "$WORK"
 echo "== claude text through installed launcher =="
-timeout 120 "$BIN/claude-opencode" -m mock-glm-free -p "Reply with exactly PONG" >"$ROOT/text.out" 2>"$ROOT/text.err"
+timeout 120 "$LAUNCHER" -m mock-glm-free -p "Reply with exactly PONG" >"$ROOT/text.out" 2>"$ROOT/text.err"
 cat "$ROOT/text.out"
 grep -q "PONG" "$ROOT/text.out" || { echo "FAIL text"; cat "$ROOT/text.err"; exit 1; }
 grep -q "ctx=123000" "$ROOT/text.err" || { echo "FAIL: launch did not refresh catalog context"; cat "$ROOT/text.err"; exit 1; }
 
 echo "== claude tool round-trip through installed launcher =="
-timeout 120 "$BIN/claude-opencode" -m mock-deepseek-free -p tooltest --allowedTools Read >"$ROOT/tool.out" 2>"$ROOT/tool.err"
+timeout 120 "$LAUNCHER" -m mock-deepseek-free -p tooltest --allowedTools Read >"$ROOT/tool.out" 2>"$ROOT/tool.err"
 cat "$ROOT/tool.out"
 grep -q "TOOL_RESULT_SEEN" "$ROOT/tool.out" || { echo "FAIL tool"; cat "$ROOT/tool.err"; exit 1; }
 grep -q "archlinux" "$ROOT/tool.out" || { echo "FAIL tool content"; cat "$ROOT/tool.err"; exit 1; }
@@ -102,7 +107,7 @@ process.stdin.on("data", (d) => s += d).on("end", () => {
 '
 
 echo "== stop =="
-"$BIN/claude-opencode" --stop
+"$LAUNCHER" --stop
 for _ in $(seq 1 50); do
   if ! curl -fsS --max-time 1 "http://127.0.0.1:$BRIDGE_PORT/health" >/dev/null 2>&1; then break; fi
   sleep 0.1
@@ -111,7 +116,7 @@ if curl -fsS --max-time 1 "http://127.0.0.1:$BRIDGE_PORT/health" >/dev/null 2>&1
   echo "FAIL: bridge still running after --stop"
   exit 1
 fi
-if "$BIN/claude-opencode" --status >/dev/null 2>&1; then
+if "$LAUNCHER" --status >/dev/null 2>&1; then
   echo "FAIL: --status succeeded after --stop"
   exit 1
 fi
