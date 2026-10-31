@@ -1,6 +1,6 @@
 # O3C — OpenCode free models in Claude Code
 
-[Source](https://github.com/AXEUS5346/O3C) · [npm](https://www.npmjs.com/package/o3c) · MIT
+[Source](https://github.com/AXEUS5346/O3C) · MIT
 
 A local Anthropic-compatible bridge that lets Claude Code use OpenCode's free
 models with:
@@ -23,26 +23,20 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 
 ## Install
 
-Install globally with npm (Linux, macOS, Windows):
+Install globally from the public repository (Linux, macOS, Windows):
 
 ```bash
-npm install -g o3c
+npm install -g github:AXEUS5346/O3C
 claude-opencode --list
 ```
 
 No clone or extra installer step is needed: npm creates the `claude-opencode`
 command, and the launcher creates its data/state directories on first use.
+Re-run the same command to update.
 
-Alternatives:
+Source checkout (development or custom bin/data/state directories):
 
 ```bash
-# Install straight from the public GitHub repository
-npm install -g github:AXEUS5346/O3C
-
-# Run without a global install
-npx --yes --package o3c claude-opencode --list
-
-# Source checkout (development or custom bin/data/state directories)
 git clone https://github.com/AXEUS5346/O3C.git
 cd O3C
 npm run install:o3c
@@ -71,7 +65,7 @@ The source installer creates the runtime directories and prints a PATH hint if
 the bin directory is not on PATH. It does **not** modify
 `~/.claude/settings.json` or `~/.config/opencode`.
 
-Keep it current with `npm update -g o3c` (or `git pull` in a source checkout).
+Keep a source checkout current with `git pull`.
 
 Platform data locations:
 
@@ -278,7 +272,7 @@ runtime with mode 0600; no secrets belong in the repository.
 
 ```bash
 claude-opencode --stop
-npm uninstall -g o3c                      # npm install
+npm uninstall -g o3c                      # global install
 npm run install:o3c -- --uninstall        # source checkout shim
 ```
 
