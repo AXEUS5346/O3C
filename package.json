@@ -1,17 +1,21 @@
 {
   "name": "o3c",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Claude Code bridge for OpenCode free models: dynamic catalog, real context, streaming, and Claude harness mapping.",
   "type": "module",
   "bin": {
-    "claude-opencode": "bin/claude-opencode"
+    "claude-opencode": "bin/claude-opencode.mjs"
   },
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test test/translate.test.mjs",
+    "install:o3c": "node scripts/install.mjs",
+    "test": "node --test test/translate.test.mjs test/install.test.mjs",
+    "test:translate": "node --test test/translate.test.mjs",
+    "test:install": "node --test test/install.test.mjs",
     "test:direct": "bash test/e2e.sh",
     "test:service": "bash test/e2e-service.sh",
+    "test:launcher": "bash test/e2e-launcher.sh",
     "test:live": "bash test/live-smoke.sh"
   },
   "engines": {

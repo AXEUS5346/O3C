@@ -7,6 +7,8 @@ const WORKDIR = "/tmp";
 const sessions = new Map();
 const clients = new Set();
 let sessionCounter = 0;
+let contextBump = 0;
+const extraModels = [];
 
 const MODELS = [
   {
@@ -145,8 +147,41 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && pathname === "/api/model") {
+    const models = [...MODELS, ...extraModels].map((model) =>
+      model.id === "mock-glm-free" && contextBump
+        ? { ...model, limit: { ...model.limit, context: model.limit.context + contextBump } }
+        : model);
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ location: { directory: WORKDIR }, data: MODELS }));
+    response.end(JSON.stringify({ location: { directory: WORKDIR }, data: models }));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/control/add-model") {
+    if (!extraModels.some((model) => model.id === "mock-new-free")) {
+      extraModels.push({
+        id: "mock-new-free",
+        modelID: "mock-new-free",
+        providerID: "opencode",
+        family: "mock-new",
+        name: "Mock New Free",
+        enabled: true,
+        status: "active",
+        cost: [{ input: 0, output: 0 }],
+        capabilities: { tools: true, input: ["text"], output: ["text"] },
+        limit: { context: 111111, output: 22222 },
+        variants: [],
+        time: { released: Date.now() },
+      });
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (request.method === "GET" && pathname === "/control/bump-context") {
+    contextBump += 23000;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ context: 100000 + contextBump }));
     return;
   }
 

@@ -7,8 +7,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { dataDir as defaultDataDir, stateDir as defaultStateDir } from "./paths.mjs";
 
 export const MODELS = [
   { id: "beam-free", name: "Beam Free", family: "beam", context: 1048576, input: 1048576, output: 131072 },
@@ -66,7 +67,7 @@ export function makeSessionId(now = Date.now()) {
 }
 
 function stateDir() {
-  return path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "opencode-free-bridge");
+  return defaultStateDir();
 }
 
 const DAILY_BUDGET = (() => {
@@ -298,7 +299,7 @@ function modelSupportsVision(id) {
 const TRANSPORT = (process.env.OPENCODE_FREE_TRANSPORT || "service").toLowerCase();
 const SERVICE_PORT = Number(process.env.OPENCODE_FREE_SERVICE_PORT || 8791);
 const SERVICE_AGENT = process.env.OPENCODE_FREE_SERVICE_AGENT || "build";
-const BRIDGE_ROOT = process.env.OPENCODE_FREE_BRIDGE_DIR || path.join(os.homedir(), ".local", "share", "opencode-free-bridge");
+const BRIDGE_ROOT = process.env.OPENCODE_FREE_BRIDGE_DIR || defaultDataDir();
 const OC_HOME = process.env.OPENCODE_FREE_HOME || path.join(BRIDGE_ROOT, "opencode-home");
 const OC_WORKDIR = process.env.OPENCODE_FREE_WORKDIR || path.join(stateDir(), "workdir");
 const OC_SERVICE_STATE = path.join(stateDir(), "opencode-service.json");
@@ -353,6 +354,48 @@ function prepareServiceHome() {
   }
 }
 
+function quoteWindowsArg(value) {
+  const text = String(value);
+  if (text === "") return '""';
+  if (!/[\s"]/u.test(text)) return text;
+  return `"${text.replace(/(\\*)"/g, "$1$1\\\"").replace(/(\\+)$/, "$1$1")}"`;
+}
+
+function serviceSpawnSpec() {
+  const args = ["serve", "--port", String(SERVICE_PORT)];
+  if (process.platform === "win32") {
+    const commandLine = `"${OPENCODE_BIN}" ${args.map(quoteWindowsArg).join(" ")}`;
+    return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/v:off", "/s", "/c", `"${commandLine}"`] };
+  }
+  return { command: OPENCODE_BIN, args };
+}
+
+async function stopProcessTree(pid) {
+  if (!pid) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    await sleep(400);
+    return;
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+      await sleep(100);
+    } catch {
+      return;
+    }
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {}
+}
+
 async function startServiceProcess() {
   fs.mkdirSync(stateDir(), { recursive: true });
   try {
@@ -367,14 +410,17 @@ async function startServiceProcess() {
     XDG_DATA_HOME: path.join(OC_HOME, ".local", "share"),
     XDG_STATE_HOME: path.join(OC_HOME, ".local", "state"),
     XDG_CACHE_HOME: path.join(OC_HOME, ".cache"),
+    ...(process.platform === "win32" ? { USERPROFILE: OC_HOME } : {}),
   };
   let child;
+  const spec = serviceSpawnSpec();
   try {
-    child = spawn(OPENCODE_BIN, ["serve", "--port", String(SERVICE_PORT)], {
+    child = spawn(spec.command, spec.args, {
       env,
       cwd: OC_WORKDIR,
       detached: true,
       stdio: ["ignore", fd, fd],
+      windowsHide: true,
     });
   } finally {
     fs.closeSync(fd);
@@ -413,9 +459,7 @@ async function startServiceProcess() {
     if (password && listening) return { password, pid: child.pid };
     await sleep(100);
   }
-  try {
-    child.kill();
-  } catch {}
+  await stopProcessTree(child.pid);
   throw new Error(`${failure || "opencode serve did not start"} (log: ${OC_SERVICE_LOG})`);
 }
 
@@ -544,18 +588,7 @@ function writeCatalogSnapshot(value) {
 async function restartService() {
   const state = serviceState || readServiceState();
   if (state?.pid) {
-    try {
-      process.kill(state.pid);
-    } catch {}
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      try {
-        process.kill(state.pid, 0);
-        await sleep(100);
-      } catch {
-        break;
-      }
-    }
+    await stopProcessTree(state.pid);
   }
   try {
     fs.rmSync(OC_SERVICE_STATE, { force: true });
@@ -571,13 +604,13 @@ async function restartService() {
   throw new Error(`could not restart opencode service on port ${SERVICE_PORT}`);
 }
 
-async function refreshCatalog({ force = false } = {}) {
+async function refreshCatalog({ restart = false } = {}) {
   if (TRANSPORT !== "service") return catalog;
   if (catalogRefreshing) return catalogRefreshing;
   catalogRefreshing = (async () => {
     let state;
     try {
-      state = force && activeGenerations === 0 ? await restartService() : await ensureService();
+      state = restart && activeGenerations === 0 ? await restartService() : await ensureService();
     } catch (error) {
       logError(`catalog: service unavailable: ${error.message}`);
       return catalog;
@@ -665,7 +698,7 @@ async function autoRefreshOnDrift() {
     `catalog: drift vs models.dev; restarting transport (new: ${missing.join(",") || "-"}; removed: ${stale.join(",") || "-"})`,
   );
   try {
-    await refreshCatalog({ force: true });
+    await refreshCatalog({ restart: true });
   } catch (error) {
     logError(`catalog: drift refresh failed: ${error.message}`);
   }
@@ -1183,7 +1216,7 @@ async function handleServiceMessages(body, res) {
       if (isFree) {
         fail(
           429,
-          `OpenCode free quota is exhausted for this account/agent: ${message} The free models share this daily quota.`,
+          `OpenCode free limit reached for ${modelId}: ${message} Try another free model or wait for the allowance to reset.`,
           "rate_limit_error",
           { "retry-after": "3600" },
         );
@@ -1233,7 +1266,7 @@ async function handleServiceMessages(body, res) {
     if (isFree) {
       fail(
         429,
-        `OpenCode free quota is exhausted for this account/agent: ${message} The free models share this daily quota.`,
+        `OpenCode free limit reached for ${modelId}: ${message} Try another free model or wait for the allowance to reset.`,
         "rate_limit_error",
         { "retry-after": "3600" },
       );
@@ -1606,7 +1639,7 @@ function upstreamErrorInfo(status, bodyText, headers) {
     if (retryAfter > 0) {
       parts.push(`Retry in about ${formatDuration(retryAfter)} (reset at ${new Date(Date.now() + retryAfter * 1000).toLocaleString()}).`);
     }
-    parts.push("All seven free models share this daily quota; OpenCode Go models are not used by this bridge.");
+    parts.push("Free limits can be enforced per model; try another free model or wait for the reset. OpenCode Go models are not used by this bridge.");
     message = parts.join(" ");
   } else {
     message = `OpenCode upstream error (HTTP ${status})${type ? ` [${type}]` : ""}: ${detail || "request failed"}`;
@@ -2028,7 +2061,7 @@ export function createServer() {
     if (req.method === "GET" && (pathname === "/v1/models" || pathname === "/models")) {
       if (url.searchParams.get("refresh") === "1" && TRANSPORT === "service") {
         try {
-          await refreshCatalog({ force: true });
+          await refreshCatalog();
         } catch (error) {
           logError(`catalog refresh failed: ${error.message}`);
         }

@@ -4,7 +4,7 @@
 Claude Code (Anthropic Messages API)
         |
         v
-bin/claude-opencode  (env: base URL, auth token, model, context/output, settings)
+bin/claude-opencode.mjs  (env: base URL, auth token, model, context/output, settings)
         |
         v
 src/server.mjs  :8787
@@ -48,8 +48,10 @@ a dedicated home (0600) at runtime, so the user's TUI/config is independent.
 `GET /api/model` is filtered to provider `opencode`, active/enabled, cost 0,
 text output. The catalog stores real limits, vision, aliases, new/removed IDs
 and a default. A snapshot in state tracks `[new]` (7 days) and `removed`.
-Refresh: every 5 minutes; models.dev drift check every 15 minutes; `--list`
-forces a refresh. The runtime catalog is authoritative.
+Every launcher invocation and every `--list` re-reads `/api/model`, so model
+updates and context/output changes are picked up immediately. Background
+refresh runs every 5 minutes; a models.dev drift check every 15 minutes may
+restart the transport. The runtime catalog is authoritative.
 
 ## Budget
 
@@ -59,11 +61,17 @@ runaway-loop guard, not a quota bypass, and does not see TUI/CLI usage.
 
 ## State
 
-- `~/.local/share/opencode-free-bridge/opencode-home/` — dedicated OpenCode
-  home/DB/auth copy
-- `~/.local/share/opencode-free-bridge/claude-settings.json` — generated picker
-- `~/.local/state/opencode-free-bridge/` — bridge.log, opencode-service.log/json,
-  catalog.json, usage.json, workdir
+Paths come from `src/paths.mjs`; `OPENCODE_FREE_DATA_DIR` and
+`OPENCODE_FREE_STATE_DIR` override them.
+
+- `<data>/opencode-home/` — dedicated OpenCode home/DB/auth copy
+- `<data>/claude-settings.json` — generated picker
+- `<state>/` — bridge.log, opencode-service.log/json, catalog.json, usage.json,
+  bridge.pid, workdir
+
+Linux defaults to XDG paths, macOS to `~/Library/Application Support`, and
+Windows to `%LOCALAPPDATA%`. The state directory is under the data directory on
+macOS and Windows.
 
 ## Failure modes
 

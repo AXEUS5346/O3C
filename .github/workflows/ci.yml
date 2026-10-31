@@ -19,8 +19,27 @@ jobs:
       - name: Syntax
         run: |
           node --check src/server.mjs
-          bash -n bin/claude-opencode scripts/install.sh test/e2e.sh test/e2e-service.sh test/live-smoke.sh
+          node --check src/paths.mjs
+          node --check bin/claude-opencode.mjs
+          node --check scripts/install.mjs
+          bash -n scripts/install.sh test/e2e.sh test/e2e-service.sh test/e2e-launcher.sh test/live-smoke.sh
       - name: Unit tests
         env:
           XDG_STATE_HOME: ${{ runner.temp }}/state
-        run: node --test test/translate.test.mjs
+        run: node --test test/translate.test.mjs test/install.test.mjs
+
+  cross-platform-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit and install tests
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/state
+        run: node --test test/translate.test.mjs test/install.test.mjs

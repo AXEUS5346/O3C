@@ -5,13 +5,13 @@ listens on a public interface.
 
 ## Secrets and state
 
-- The bridge copies `auth.json` and `account.json` from
-  `~/.local/share/opencode/` into a dedicated OpenCode home under
-  `~/.local/share/opencode-free-bridge/opencode-home/` at runtime.
+- The bridge copies `auth.json` and `account.json` from the user's OpenCode data
+  directory into a dedicated OpenCode home under the O3C data directory at
+  runtime.
 - Copied credential files are created with mode `0600`; the dedicated home
   should stay private to the user.
-- Service passwords, usage state, catalog snapshots and logs live under
-  `~/.local/state/opencode-free-bridge/` and are not part of this repository.
+- Service passwords, usage state, catalog snapshots and logs live under the O3C
+  state directory and are not part of this repository.
 - No API keys, tokens, session data, or credentials belong in the repository.
   `.gitignore` excludes the runtime state and credential filenames.
 

@@ -14,7 +14,7 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 
 ## Requirements
 
-- Linux
+- Linux, macOS, or Windows 10/11
 - Node.js **>= 22**
 - `opencode` (v2.1.x) with a logged-in OpenCode account
 - Claude Code (`claude`)
@@ -23,12 +23,40 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 
 ```bash
 git clone <private-repo-url> ~/O3C
-~/O3C/scripts/install.sh
+cd ~/O3C
+npm run install:o3c
 ```
 
-The installer symlinks `claude-opencode` into `~/.local/bin` and creates the
-runtime data/state directories. It does **not** modify `~/.claude/settings.json`
-or `~/.config/opencode`.
+The installer is a Node script, so the same command works in bash, zsh,
+PowerShell and cmd.exe. It creates a launcher shim in the platform bin directory:
+
+| OS | default bin dir | shim |
+|---|---|---|
+| Linux | `${XDG_BIN_HOME:-~/.local/bin}` | symlink to `bin/claude-opencode.mjs` |
+| macOS | `${XDG_BIN_HOME:-~/.local/bin}` | symlink to `bin/claude-opencode.mjs` |
+| Windows | `npm prefix -g` (usually `%APPDATA%\npm`) | `.cmd`, `.ps1` and POSIX sh shims |
+
+Options:
+
+```bash
+npm run install:o3c -- --bin-dir /custom/bin
+npm run install:o3c -- --data-dir /custom/data --state-dir /custom/state
+npm run install:o3c -- --uninstall          # keeps data and state
+npm run install:o3c -- --force              # replace an unrecognized shim (backs it up)
+```
+
+`scripts/install.sh` remains as a thin compatibility wrapper for Unix users.
+The installer creates the runtime directories and prints a PATH hint if the bin
+directory is not on PATH. It does **not** modify `~/.claude/settings.json` or
+`~/.config/opencode`.
+
+Platform data locations:
+
+| OS | data | state |
+|---|---|---|
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/opencode-free-bridge` | `${XDG_STATE_HOME:-~/.local/state}/opencode-free-bridge` |
+| macOS | `~/Library/Application Support/opencode-free-bridge` | `<data>/state` |
+| Windows | `%LOCALAPPDATA%\opencode-free-bridge` | `<data>\state` |
 
 ## Quick start
 
@@ -63,8 +91,9 @@ source: service   updated: 2026-11-01T...   default: deepseek-v4.1-flash-free
 - Aliases are generated automatically; full IDs always work.
 - New models are marked `[new]` for seven days.
 - Removed models disappear and are listed under `removed:`.
-- Refresh every 5 minutes; a models.dev drift check every 15 minutes; `--list`
-  forces a refresh (it may briefly restart the transport).
+- **Every launch and every `--list` re-reads the live catalog**, including
+  context/output limits and vision capability.
+- Background refresh every 5 minutes; a models.dev drift check every 15 minutes.
 - Real `limit.context/input/output` and vision capability come from the runtime.
 
 ## Free-tier reality (read this)
@@ -151,7 +180,9 @@ unchanged.
 | `OPENCODE_FREE_DAILY_BUDGET` | `40` | local bridge requests/day; `0` disables |
 | `OPENCODE_FREE_DEFAULT_MODEL` | `deepseek-v4.1-flash-free` | default/fallback |
 | `OPENCODE_FREE_BEHAVES_AS` | `claude-opus-4-8` | Claude profile for picker rows |
-| `OPENCODE_FREE_DATA_DIR` | `~/.local/share/opencode-free-bridge` | data/dedicated home |
+| `OPENCODE_FREE_DATA_DIR` | platform data dir | data/dedicated home |
+| `OPENCODE_FREE_STATE_DIR` | platform state dir | logs, pid, catalog, usage |
+| `OPENCODE_FREE_BIN_DIR` | platform bin dir | installer target |
 | `OPENCODE_FREE_HOME` | `$DATA_DIR/opencode-home` | dedicated OpenCode HOME |
 | `OPENCODE_FREE_WORKDIR` | `.../state/.../workdir` | session workdir |
 | `OPENCODE_BIN` | `opencode` | OpenCode binary |
@@ -160,11 +191,19 @@ unchanged.
 ## Tests
 
 ```bash
-npm test                 # unit tests (no quota)
+npm test                 # unit + installer tests (no quota)
+npm run test:install     # cross-platform installer tests only
 npm run test:direct      # Claude Code <-> bridge <-> OpenAI mock (no quota)
 npm run test:service     # Claude Code <-> bridge <-> mock OpenCode service (no quota)
+npm run test:launcher    # installed shim + mock service + Claude Code (no quota)
 npm run test:live        # one request per current free model (uses quota!)
 ```
+
+`test:launcher` installs into a temporary bin directory, starts the bridge
+through that shim against a mock OpenCode service, then verifies the dynamic
+catalog, a Claude text reply, a real Read tool round-trip, streaming deltas,
+usage accounting and `--stop`. It requires `claude` on PATH and a Unix-like
+shell; CI runs installer tests on Ubuntu, macOS and Windows.
 
 The mock service tests exercise the dynamic catalog, real limits, streaming,
 and a real Read tool round-trip. Use them for code verification; use the live
@@ -173,14 +212,18 @@ smoke sparingly after a quota reset.
 ## Repo layout
 
 ```text
-bin/claude-opencode          launcher (repo-aware; symlinked on install)
+bin/claude-opencode.mjs      cross-platform Node launcher
 src/server.mjs               bridge, transport, streaming, catalog, budget
-scripts/install.sh           installer/symlink
+src/paths.mjs                platform data/state/bin path resolution
+scripts/install.mjs          npm installer and shim generator
+scripts/install.sh           Unix compatibility wrapper
 test/translate.test.mjs      unit tests
+test/install.test.mjs        installer tests (all OSes)
 test/mock-upstream.mjs       OpenAI-compatible mock (direct transport)
 test/mock-opencode-service.mjs  OpenCode service mock
 test/e2e.sh                  direct-transport E2E
 test/e2e-service.sh          full service-transport E2E
+test/e2e-launcher.sh         installed-shim E2E
 test/live-smoke.sh           live one-shot per current model
 docs/ARCHITECTURE.md         request flow and state
 docs/REA-FINDINGS.md         reverse-engineering notes
@@ -188,10 +231,9 @@ docs/REA-FINDINGS.md         reverse-engineering notes
 
 Runtime state:
 
-- `~/.local/share/opencode-free-bridge/` — dedicated OpenCode home, auth copy,
-  generated `claude-settings.json`
-- `~/.local/state/opencode-free-bridge/` — bridge/service logs, catalog snapshot,
-  usage counter, project/session state
+- data dir — dedicated OpenCode home, auth copy, generated `claude-settings.json`
+- state dir — bridge/service logs, catalog snapshot, usage counter, pid files,
+  project/session state
 
 ## Security
 
@@ -206,16 +248,18 @@ runtime with mode 0600; no secrets belong in the repository.
 - Streaming is text-only; reasoning is not exposed.
 - The catalog follows OpenCode's runtime view; a legacy cost-0 model may appear
   even if its free allowance is unavailable on the account.
-- The free tier is limited-time, request-capped and shared; O3C does not bypass
-  it.
+- The free tier is limited-time and subject to OpenCode's per-model/account
+  limits; O3C does not bypass it.
 
 ## Uninstall
 
 ```bash
 claude-opencode --stop
-rm ~/.local/bin/claude-opencode
-rm -rf ~/.local/share/opencode-free-bridge ~/.local/state/opencode-free-bridge
+npm run install:o3c -- --uninstall     # removes the shim, keeps data/state
 ```
+
+Then delete the data/state directories printed by the uninstaller if you also
+want to remove the auth copy, logs and usage history.
 
 ## Free-tier references
 
