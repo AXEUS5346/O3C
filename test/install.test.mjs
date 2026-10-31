@@ -28,11 +28,7 @@ function runShim(args) {
   const env = { ...process.env, OPENCODE_FREE_DATA_DIR: DATA, OPENCODE_FREE_STATE_DIR: STATE };
   if (process.platform === "win32") {
     const line = `"${shim}" ${args.map((arg) => `"${arg}"`).join(" ")}`;
-    return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/v:off", "/s", "/c", `"${line}"`], {
-      encoding: "utf8",
-      env,
-      windowsHide: true,
-    });
+    return spawnSync(line, { shell: true, encoding: "utf8", env, windowsHide: true });
   }
   return spawnSync(shim, args, { encoding: "utf8", env, windowsHide: true });
 }

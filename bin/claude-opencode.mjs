@@ -280,14 +280,15 @@ function claudeSpawnSpec(args) {
   if (process.platform !== "win32") return { command: "claude", args };
   const command = findOnWindows("claude");
   if (!command) fail("'claude' (Claude Code) was not found on PATH", 127);
-  if (/\.(exe|com)$/i.test(command)) return { command, args };
+  if (/\.(exe|com)$/i.test(command)) return { command, args, shell: false };
   const line = `"${command}" ${args.map(quoteWindowsArg).join(" ")}`;
-  return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/v:off", "/s", "/c", `"${line}"`] };
+  return { command: line, args: [], shell: true };
 }
 
 async function launchClaude(model, args) {
   const spec = claudeSpawnSpec(args);
   const child = spawn(spec.command, spec.args, {
+    shell: spec.shell,
     stdio: "inherit",
     env: {
       ...process.env,

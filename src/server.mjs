@@ -365,9 +365,9 @@ function serviceSpawnSpec() {
   const args = ["serve", "--port", String(SERVICE_PORT)];
   if (process.platform === "win32") {
     const commandLine = `"${OPENCODE_BIN}" ${args.map(quoteWindowsArg).join(" ")}`;
-    return { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/v:off", "/s", "/c", `"${commandLine}"`] };
+    return { command: commandLine, args: [], shell: true };
   }
-  return { command: OPENCODE_BIN, args };
+  return { command: OPENCODE_BIN, args, shell: false };
 }
 
 async function stopProcessTree(pid) {
@@ -419,6 +419,7 @@ async function startServiceProcess() {
       env,
       cwd: OC_WORKDIR,
       detached: true,
+      shell: spec.shell,
       stdio: ["ignore", fd, fd],
       windowsHide: true,
     });
