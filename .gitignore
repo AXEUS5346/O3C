@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.*
+*.log
+coverage/
+*.tmp
+.DS_Store
+
+# Runtime data and secrets
+opencode-home/
+auth.json
+account.json
+catalog.json
+usage.json
+opencode-service.json
+claude-settings.json
+opencode-service.log
+bridge.log
+bridge.pid

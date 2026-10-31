@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "${{ matrix.node }}"
+      - name: Syntax
+        run: |
+          node --check src/server.mjs
+          bash -n bin/claude-opencode scripts/install.sh test/e2e.sh test/e2e-service.sh test/live-smoke.sh
+      - name: Unit tests
+        env:
+          XDG_STATE_HOME: ${{ runner.temp }}/state
+        run: node --test test/translate.test.mjs

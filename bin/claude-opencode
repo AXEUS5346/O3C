@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+# Launch Claude Code against OpenCode Zen's free models through a local
+# Anthropic-compatible bridge. Does not touch ~/.claude/settings.json.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+SERVER="$REPO_ROOT/src/server.mjs"
+DATA_DIR="${OPENCODE_FREE_DATA_DIR:-$HOME/.local/share/opencode-free-bridge}"
+PORT="${OPENCODE_FREE_PORT:-8787}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/opencode-free-bridge"
+LOG="$STATE_DIR/bridge.log"
+BASE="http://127.0.0.1:$PORT"
+SETTINGS_FILE="$DATA_DIR/claude-settings.json"
+REQUESTED_MODEL="${OPENCODE_FREE_MODEL:-}"
+export OPENCODE_FREE_BRIDGE_DIR="$DATA_DIR"
+
+usage() {
+  cat <<'EOF'
+Usage: claude-opencode [options] [--] [claude args...]
+
+Options:
+  -m, --model <name>   Model alias or full ID (default: bridge default)
+  -l, --list           Refresh and list current free OpenCode models
+      --status         Show bridge, transport and catalog status
+      --stop           Stop the bridge and its dedicated OpenCode service
+      --log            Print the bridge log path
+  -h, --help           Show this help
+
+The model list is dynamic and comes from the running OpenCode service.
+Run --list to see current aliases, real context windows and new/removed models.
+Anything after -- (or any unrecognized leading arg) is passed to Claude Code.
+EOF
+}
+
+start_bridge() {
+  mkdir -p "$STATE_DIR" "$DATA_DIR"
+  if curl -fsS --max-time 1 "$BASE/health" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "claude-opencode: node is required but was not found" >&2
+    exit 1
+  fi
+  nohup node "$SERVER" >>"$LOG" 2>&1 &
+  echo $! >"$STATE_DIR/bridge.pid"
+  for _ in $(seq 1 100); do
+    if curl -fsS --max-time 1 "$BASE/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "claude-opencode: bridge failed to start; see $LOG" >&2
+  tail -n 20 "$LOG" >&2 || true
+  exit 1
+}
+
+fetch_catalog() {
+  local force="${1:-0}" url catalog source i
+  if [ "$force" = "1" ]; then
+    url="$BASE/v1/models?refresh=1"
+  else
+    url="$BASE/v1/models"
+  fi
+  for i in $(seq 1 40); do
+    catalog="$(curl -fsS --max-time 90 "$url" 2>/dev/null || true)"
+    if [ -n "$catalog" ]; then
+      source="$(printf '%s' "$catalog" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).source||"")}catch{}})' 2>/dev/null || true)"
+      if [ "$force" = "1" ] || [ "$source" = "service" ]; then
+        printf '%s' "$catalog"
+        return 0
+      fi
+    fi
+    sleep 0.5
+  done
+  printf '%s' "${catalog:-}"
+  return 0
+}
+
+list_models() {
+  local catalog
+  catalog="$(fetch_catalog 1)"
+  if [ -z "$catalog" ]; then
+    echo "claude-opencode: could not read the model catalog; see --status and --log" >&2
+    exit 1
+  fi
+  printf '%s' "$catalog" | node -e '
+let s="";
+process.stdin.on("data", d => s += d).on("end", () => {
+  const cat = JSON.parse(s);
+  const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+  console.log("source: " + (cat.source || "?") + "   updated: " + (cat.updated_at || "pending") + "   default: " + (cat.default || "?"));
+  for (const m of cat.data || []) {
+    const marker = m.new ? "[new]" : "     ";
+    const alias = String(m.alias || "").padEnd(14);
+    const id = String(m.id || "").padEnd(34);
+    console.log(marker + " " + alias + " " + id + " ctx " + fmt(m.context_window).padStart(10) + "  out " + fmt(m.max_output_tokens).padStart(9) + "  " + (m.vision ? "vision" : "text"));
+  }
+  if (cat.removed && cat.removed.length) {
+    console.log("removed: " + cat.removed.map((r) => r.id).join(", "));
+  }
+  if (cat.source !== "service") {
+    console.log("note: live catalog was not ready; showing the fallback list.");
+  }
+});
+'
+}
+
+resolve_requested() {
+  local catalog="$1" resolved
+  if ! resolved="$(printf '%s' "$catalog" | node -e '
+let s="";
+process.stdin.on("data", d => s += d).on("end", () => {
+  const cat = JSON.parse(s);
+  const requested = String(process.argv[1] || "").trim().toLowerCase();
+  const data = cat.data || [];
+  let model;
+  if (!requested) {
+    model = data.find((m) => m.id === cat.default) || data[0];
+  } else {
+    model = data.find((m) => String(m.id).toLowerCase() === requested ||
+      String(m.alias || "").toLowerCase() === requested ||
+      (m.aliases || []).some((a) => String(a).toLowerCase() === requested));
+  }
+  if (!model) {
+    const available = data.map((m) => (m.alias || m.id) + " (" + m.id + ")").join(", ");
+    console.error("claude-opencode: model \"" + process.argv[1] + "\" is not in the current free catalog.");
+    console.error("Available: " + available);
+    console.error("Run: claude-opencode --list");
+    process.exit(3);
+  }
+  console.log([model.id, model.context_window || 200000, model.max_output_tokens || 32000, model.alias || model.id].join("\t"));
+});
+' "$REQUESTED_MODEL" 2>"$STATE_DIR/model-resolve.err")"; then
+    cat "$STATE_DIR/model-resolve.err" >&2
+    rm -f "$STATE_DIR/model-resolve.err"
+    exit 2
+  fi
+  rm -f "$STATE_DIR/model-resolve.err"
+  printf '%s' "$resolved"
+}
+
+PASSTHROUGH=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --) shift; PASSTHROUGH+=("$@"); break ;;
+    -m|--model)
+      [ $# -ge 2 ] || { echo "claude-opencode: $1 needs a value" >&2; exit 2; }
+      REQUESTED_MODEL="$2"; shift 2 ;;
+    -m=*|--model=*) REQUESTED_MODEL="${1#*=}"; shift ;;
+    -l|--list) start_bridge; list_models; exit 0 ;;
+    --log) echo "$LOG"; exit 0 ;;
+    --stop)
+      if [ -f "$STATE_DIR/bridge.pid" ]; then
+        kill "$(cat "$STATE_DIR/bridge.pid")" 2>/dev/null || true
+        rm -f "$STATE_DIR/bridge.pid"
+      fi
+      if [ -f "$STATE_DIR/opencode-service.json" ]; then
+        SPID=$(node -e 'try{const s=require(process.argv[1]);if(s&&s.pid)console.log(s.pid)}catch{}' "$STATE_DIR/opencode-service.json" 2>/dev/null || true)
+        [ -n "$SPID" ] && kill "$SPID" 2>/dev/null || true
+        rm -f "$STATE_DIR/opencode-service.json"
+      fi
+      echo "claude-opencode stopped"
+      exit 0 ;;
+    --status)
+      if curl -fsS --max-time 2 "$BASE/health"; then
+        echo
+        echo "log: $LOG"
+      else
+        echo "bridge not running on port $PORT" >&2
+        echo "log: $LOG" >&2
+        exit 1
+      fi
+      exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) PASSTHROUGH+=("$1"); shift; PASSTHROUGH+=("$@"); break ;;
+  esac
+done
+
+start_bridge
+CATALOG="$(fetch_catalog 0)"
+if [ -z "$CATALOG" ]; then
+  echo "claude-opencode: could not read the model catalog; see --status and --log" >&2
+  exit 1
+fi
+RESOLVED="$(resolve_requested "$CATALOG")"
+IFS=$'\t' read -r MODEL CONTEXT OUTPUT ALIAS <<<"$RESOLVED"
+
+export ANTHROPIC_BASE_URL="$BASE"
+export ANTHROPIC_AUTH_TOKEN="opencode-free"
+export ANTHROPIC_MODEL="$MODEL"
+export ANTHROPIC_SMALL_FAST_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$MODEL"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$MODEL"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CONTEXT"
+export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$OUTPUT"
+unset ANTHROPIC_API_KEY
+
+printf '%s' "$CATALOG" | node -e '
+let s="";
+process.stdin.on("data", d => s += d).on("end", () => {
+  const fs = require("fs");
+  const cat = JSON.parse(s);
+  const behaves = process.argv[1] || "claude-opus-4-8";
+  const fmt = (n) => Number(n || 0).toLocaleString("en-US");
+  const options = (cat.data || []).map((m) => ({
+    model: m.id,
+    label: (m.alias || m.id) + " · " + (m.display_name || m.id),
+    description: "OpenCode free · " + fmt(m.context_window) + " ctx · " + fmt(m.max_output_tokens) + " out" + (m.vision ? " · vision" : ""),
+    behavesAs: behaves,
+  }));
+  fs.writeFileSync(process.argv[2], JSON.stringify({ modelPicker: { replaceBuiltInOptions: false, options } }, null, 2) + "\n");
+});
+' "${OPENCODE_FREE_BEHAVES_AS:-claude-opus-4-8}" "$SETTINGS_FILE"
+
+echo "[claude-opencode] model=$ALIAS ($MODEL) ctx=$CONTEXT out=$OUTPUT bridge=$BASE" >&2
+exec claude --settings "$SETTINGS_FILE" --model "$MODEL" "${PASSTHROUGH[@]}"
