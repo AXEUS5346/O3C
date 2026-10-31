@@ -113,6 +113,42 @@ test("doctor explains missing prerequisites and how to install them", () => {
   assert.match(output, /claude\.ai\/install/);
   assert.match(output, /opencode auth login/);
   assert.match(output, /o3c --doctor/);
+
+  const list = spawnSync(process.execPath, [LAUNCHER, "--list"], { encoding: "utf8", env, windowsHide: true });
+  assert.equal(list.status, 1, list.stdout);
+  assert.match(`${list.stdout}\n${list.stderr}`, /\[MISSING\] OpenCode 2\.x/);
+});
+
+test("installer prints the same guidance but still installs the shim", () => {
+  fs.mkdirSync(EMPTY, { recursive: true });
+  fs.mkdirSync(HOME, { recursive: true });
+  const binDir = path.join(ROOT, "guided-bin");
+  const env = {
+    ...process.env,
+    PATH: EMPTY,
+    HOME,
+    USERPROFILE: HOME,
+    XDG_DATA_HOME: path.join(HOME, ".local", "share"),
+    LOCALAPPDATA: path.join(HOME, "local-app-data"),
+    APPDATA: path.join(HOME, "app-data"),
+  };
+  delete env.OPENCODE_BIN;
+  delete env.CLAUDE_BIN;
+
+  const result = spawnSync(process.execPath, [
+    INSTALLER,
+    "--bin-dir", binDir,
+    "--data-dir", path.join(ROOT, "guided-data"),
+    "--state-dir", path.join(ROOT, "guided-state"),
+  ], { encoding: "utf8", env, windowsHide: true });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.equal(result.status, 0, output);
+  assert.match(output, /\[MISSING\] OpenCode 2\.x/);
+  assert.match(output, /\[MISSING\] Claude Code/);
+  assert.match(output, /https:\/\/opencode\.ai/);
+  assert.match(output, /claude\.ai\/install/);
+  assert.match(output, /o3c --doctor/);
+  assert.ok(fs.existsSync(path.join(binDir, process.platform === "win32" ? "o3c.cmd" : "o3c")));
 });
 
 test("doctor reports a complete environment and next step", () => {
