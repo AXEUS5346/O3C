@@ -1,7 +1,6 @@
 {
   "name": "o3c",
   "version": "0.2.0",
-  "private": true,
   "description": "Claude Code bridge for OpenCode free models: dynamic catalog, real context, streaming, and Claude harness mapping.",
   "type": "module",
   "bin": {
@@ -17,6 +16,33 @@
     "test:service": "bash test/e2e-service.sh",
     "test:launcher": "bash test/e2e-launcher.sh",
     "test:live": "bash test/live-smoke.sh"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "README.md",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AXEUS5346/O3C.git"
+  },
+  "homepage": "https://github.com/AXEUS5346/O3C#readme",
+  "bugs": {
+    "url": "https://github.com/AXEUS5346/O3C/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "opencode",
+    "anthropic",
+    "bridge",
+    "free-models",
+    "streaming"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=22"

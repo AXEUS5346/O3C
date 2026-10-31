@@ -1,5 +1,7 @@
 # O3C — OpenCode free models in Claude Code
 
+[Source](https://github.com/AXEUS5346/O3C) · [npm](https://www.npmjs.com/package/o3c) · MIT
+
 A local Anthropic-compatible bridge that lets Claude Code use OpenCode's free
 models with:
 
@@ -21,13 +23,32 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 
 ## Install
 
+Install globally with npm (Linux, macOS, Windows):
+
 ```bash
-git clone <private-repo-url> ~/O3C
-cd ~/O3C
+npm install -g o3c
+claude-opencode --list
+```
+
+No clone or extra installer step is needed: npm creates the `claude-opencode`
+command, and the launcher creates its data/state directories on first use.
+
+Alternatives:
+
+```bash
+# Install straight from the public GitHub repository
+npm install -g github:AXEUS5346/O3C
+
+# Run without a global install
+npx --yes --package o3c claude-opencode --list
+
+# Source checkout (development or custom bin/data/state directories)
+git clone https://github.com/AXEUS5346/O3C.git
+cd O3C
 npm run install:o3c
 ```
 
-The installer is a Node script, so the same command works in bash, zsh,
+The source installer is a Node script, so the same command works in bash, zsh,
 PowerShell and cmd.exe. It creates a launcher shim in the platform bin directory:
 
 | OS | default bin dir | shim |
@@ -46,9 +67,11 @@ npm run install:o3c -- --force              # replace an unrecognized shim (back
 ```
 
 `scripts/install.sh` remains as a thin compatibility wrapper for Unix users.
-The installer creates the runtime directories and prints a PATH hint if the bin
-directory is not on PATH. It does **not** modify `~/.claude/settings.json` or
-`~/.config/opencode`.
+The source installer creates the runtime directories and prints a PATH hint if
+the bin directory is not on PATH. It does **not** modify
+`~/.claude/settings.json` or `~/.config/opencode`.
+
+Keep it current with `npm update -g o3c` (or `git pull` in a source checkout).
 
 Platform data locations:
 
@@ -255,7 +278,8 @@ runtime with mode 0600; no secrets belong in the repository.
 
 ```bash
 claude-opencode --stop
-npm run install:o3c -- --uninstall     # removes the shim, keeps data/state
+npm uninstall -g o3c                      # npm install
+npm run install:o3c -- --uninstall        # source checkout shim
 ```
 
 Then delete the data/state directories printed by the uninstaller if you also

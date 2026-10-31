@@ -11,6 +11,7 @@
   LOCALAPPDATA).
 - Installer tests and a CI matrix on Ubuntu, macOS and Windows.
 - Installed-shim end-to-end test against the mock OpenCode service.
+- Public source repository, npm package metadata, and global/npx install docs.
 
 ## 0.1.0
 
