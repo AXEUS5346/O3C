@@ -183,6 +183,26 @@ test("emits a valid Anthropic SSE sequence for text and tool calls", () => {
   assert.equal(delta.data.usage.output_tokens, 7);
 });
 
+test("streams multiple tool calls as separate valid blocks", () => {
+  const res = fakeResponse();
+  const writer = createSseWriter(res, "deepseek-v4.1-flash-free", 10);
+  writer.start();
+  writer.toolCall({ index: 0, id: "call_a", function: { name: "Bash", arguments: '{"command":"echo A"}' } });
+  writer.toolCall({ index: 1, id: "call_b", function: { name: "Read", arguments: '{"file_path":"/tmp/x"}' } });
+  writer.finish("tool_calls", { prompt_tokens: 10, completion_tokens: 4 });
+
+  const starts = res.events.filter(
+    (event) => event.event === "content_block_start" && event.data.content_block.type === "tool_use",
+  );
+  assert.deepEqual(starts.map((event) => event.data.content_block.name), ["Bash", "Read"]);
+  const deltas = res.events.filter(
+    (event) => event.event === "content_block_delta" && event.data.delta.type === "input_json_delta",
+  );
+  assert.equal(deltas.length, 2);
+  assert.deepEqual(JSON.parse(deltas[0].data.delta.partial_json), { command: "echo A" });
+  assert.deepEqual(JSON.parse(deltas[1].data.delta.partial_json), { file_path: "/tmp/x" });
+});
+
 test("text-only stream closes with end_turn", () => {
   const res = fakeResponse();
   const writer = createSseWriter(res, "glm-5.3-flash-free", 10);
@@ -206,9 +226,11 @@ test("tells models that listed tools are available and should be used", () => {
     "deepseek-v4.1-flash-free",
   );
   assert.match(prompt, /You have these Claude Code tools available: Bash/);
-  assert.match(prompt, /Bash is a real, working tool/);
+  assert.match(prompt, /These listed tools are Claude Code tools and are allowed/);
+  assert.match(prompt, /Bash is a real, working Claude Code tool/);
   assert.match(prompt, /Never claim that Bash or another listed tool is unavailable/);
   assert.match(prompt, /call the appropriate tool with the JSON protocol/);
+  assert.match(prompt, /Example: to inspect settings with Bash/);
   assert.match(prompt, /Tool results marked without \[tool error\] are successful/);
 });
 

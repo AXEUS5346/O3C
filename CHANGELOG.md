@@ -10,6 +10,10 @@
   compatibility.
 - Tell free models explicitly that listed Claude Code tools (including Bash)
   are available and that successful tool results are authoritative.
+- Fix streaming of multiple tool calls: each call now gets its own block instead
+  of being merged into one malformed input.
+- Clarify that Claude Code tools are allowed while OpenCode's internal tools are
+  not, so models stop treating Bash as forbidden.
 
 ## 0.3.0
 

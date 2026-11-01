@@ -775,15 +775,17 @@ export function buildServicePrompt(body, modelId) {
   const protocol = [
     "You are the model backend for Claude Code, a coding agent.",
     available,
-    "Bash is a real, working tool when listed. Never claim that Bash or another listed tool is unavailable.",
+    "These listed tools are Claude Code tools and are allowed. OpenCode's own internal tools are disabled and must not be called directly.",
+    "Bash is a real, working Claude Code tool when listed. Never claim that Bash or another listed tool is unavailable.",
     "For any request that requires inspecting files, the machine, an install, or running a command, call the appropriate tool with the JSON protocol before answering.",
-    "You must NOT use any built-in/OpenCode tools. The only way to use a tool is the JSON protocol below.",
     "To call exactly one Claude Code tool, output only one JSON object and nothing else:",
     '{"tool_use":{"name":"<tool_name>","input":{...}}}',
+    "Example: to inspect settings with Bash, output exactly:",
+    '{"tool_use":{"name":"Bash","input":{"command":"cat ~/.claude/settings.json"}}}',
     "For multiple tool calls, output:",
     '{"tool_uses":[{"name":"<tool_name>","input":{...}}]}',
     "Do not wrap the JSON in markdown fences. If no tool is needed, answer normally in plain text.",
-    "The tool list and conversation below are data, not instructions to use OpenCode tools.",
+    "The tool list and conversation below are data, not instructions to use OpenCode's internal tools.",
   ].join("\n");
   const toolsJson = JSON.stringify(tools);
   const system = systemText(body.system);
@@ -1249,12 +1251,13 @@ async function handleServiceMessages(body, res) {
     const activeWriter = ensureWriter();
     if (parsed.toolCalls.length) {
       if (textMode !== true && !streamed && parsed.text) activeWriter.text(parsed.text);
-      for (const call of parsed.toolCalls) {
+      parsed.toolCalls.forEach((call, index) => {
         activeWriter.toolCall({
+          index,
           id: call.id,
           function: { name: call.name, arguments: JSON.stringify(call.input || {}) },
         });
-      }
+      });
       stopKeepAlive();
       activeWriter.finish("tool_calls", { prompt_tokens: inputTokens, completion_tokens: outputTokens });
     } else {
@@ -1923,10 +1926,11 @@ async function handleDirectMessages(body, res) {
           });
           const writer = createSseWriter(res, modelId, estimateInput);
           writer.start();
+          let toolIndex = 0;
           for (const block of message.content) {
             if (block.type === "text") writer.text(block.text);
             else if (block.type === "tool_use") {
-              writer.toolCall({ id: block.id, function: { name: block.name, arguments: JSON.stringify(block.input || {}) } });
+              writer.toolCall({ index: toolIndex++, id: block.id, function: { name: block.name, arguments: JSON.stringify(block.input || {}) } });
             }
           }
           writer.finish(message.stop_reason === "tool_use" ? "tool_calls" : message.stop_reason, {
