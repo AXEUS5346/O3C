@@ -1088,7 +1088,7 @@ async function handleServiceMessages(body, res) {
   const prompt = buildServicePrompt(body, modelId);
   const estimateInput = estimateTokens(prompt);
   const stream = !!body.stream;
-  log(
+  logError(
     `service model=${body.model} -> ${modelId} stream=${stream} tools=${body.tools?.length || 0} promptChars=${prompt.length}`,
   );
 
