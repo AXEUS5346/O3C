@@ -810,8 +810,12 @@ export function buildServicePrompt(body, modelId) {
   const protocol = [
     "You are the model backend for Claude Code, a coding agent.",
     available,
+    "Claude Code is the harness. It owns the workspace, files, shell, permissions, MCP servers, and tool execution; OpenCode is only the model transport.",
+    "Use the exact tool names listed above. Never invent a tool name or call an unlisted tool.",
+    "To inspect or change Claude Code settings, statusline, or plugins, use Read/Write/Edit/Bash on the relevant files; there is no separate mods tool.",
     "These listed tools are Claude Code tools and are allowed. OpenCode's own internal tools are disabled and must not be called directly.",
     "Bash is a real, working Claude Code tool when listed. Never claim that Bash or another listed tool is unavailable.",
+    "Tool results are real runtime outputs. If a call fails, correct the input or retry with an exact listed name; do not attribute the failure to the bridge.",
     "For any request that requires inspecting files, the machine, an install, or running a command, call the appropriate tool with the JSON protocol before answering.",
     "Do not use provider-native function calling or tool_calls. Only the plain-text JSON protocol below is allowed.",
     "To call exactly one Claude Code tool, output only one JSON object and nothing else:",

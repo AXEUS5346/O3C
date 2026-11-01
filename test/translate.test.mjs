@@ -239,6 +239,10 @@ test("tells models that listed tools are available and should be used", () => {
   assert.match(prompt, /call the appropriate tool with the JSON protocol/);
   assert.match(prompt, /Example: to inspect settings with Bash/);
   assert.match(prompt, /Do not use provider-native function calling or tool_calls/);
+  assert.match(prompt, /Claude Code is the harness/);
+  assert.match(prompt, /Use the exact tool names listed above/);
+  assert.match(prompt, /there is no separate mods tool/);
+  assert.match(prompt, /Tool results are real runtime outputs/);
   assert.match(prompt, /Tool results marked without \[tool error\] are successful/);
 });
 

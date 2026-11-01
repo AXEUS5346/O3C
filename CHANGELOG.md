@@ -2,6 +2,9 @@
 
 ## 0.3.2
 
+- Give the model explicit Claude Code workflow rules: exact tool names only,
+  tools execute in Claude Code, settings/statusline changes use Read/Write/Edit/
+  Bash, and tool errors must be corrected rather than narrated as bridge faults.
 - Forward prompt-cache read/creation usage and keep the cacheable prefix stable.
 - Persist the last main model across launches and route background requests to it.
 - Ban provider-native tool calls and fix multi-tool streaming.
