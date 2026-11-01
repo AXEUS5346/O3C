@@ -63,9 +63,9 @@ function npmCommand(platform) {
   return platform === "win32" ? "npm.cmd" : "npm";
 }
 
-function run(command, args, { stdio = "inherit", encoding, platform } = {}) {
+function run(command, args, { stdio, encoding, platform } = {}) {
   return spawnSync(command, args, {
-    stdio,
+    stdio: stdio ?? (encoding ? "pipe" : "inherit"),
     encoding,
     shell: platform === "win32",
     windowsHide: true,
