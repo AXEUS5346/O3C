@@ -50,8 +50,8 @@ test("the packed npm tarball installs globally and runs", () => {
   assert.match(help.stdout, /Usage: o3c/);
 
   const packageRoot = [
-    path.join(PREFIX, "node_modules", "o3c"),
-    path.join(PREFIX, "lib", "node_modules", "o3c"),
+    path.join(PREFIX, "node_modules", "@axeus", "o3c"),
+    path.join(PREFIX, "lib", "node_modules", "@axeus", "o3c"),
   ].find((candidate) => fs.existsSync(path.join(candidate, "src", "server.mjs")));
   assert.ok(packageRoot, "packed package is missing src/server.mjs");
 });

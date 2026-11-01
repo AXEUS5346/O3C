@@ -10,6 +10,9 @@
   Windows, macOS and Linux guidance.
 - Add friendly installer and startup errors for permissions, busy ports, login
   and quota failures.
+- Publish to the npm registry as `@axeus/o3c` (the unscoped `o3c` name is
+  rejected by npm as too similar to existing packages); the command remains
+  `o3c`.
 
 ## 0.2.0
 
