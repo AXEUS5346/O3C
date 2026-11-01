@@ -19,7 +19,8 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 - Linux, macOS, or Windows 10/11
 - Node.js **>= 22**
 - OpenCode **2.x** (`opencode` v2.1.4 verified) with a logged-in OpenCode account
-- Claude Code (`claude`)
+- Claude Code **2.1.242+** (2.1.257+ recommended) — older versions cannot show
+  the custom model picker and only list the active model
 
 ## Check prerequisites
 
@@ -27,11 +28,18 @@ O3C is a developer tool. It is not affiliated with OpenCode or Anthropic.
 o3c --doctor
 ```
 
-The doctor checks Node, OpenCode 2.x, your OpenCode login and Claude Code. It
-prints the exact install command for your OS and exits non-zero while a required
-item is missing. Every normal launch runs the same preflight: it stops with the
-same instructions instead of failing later inside the bridge. A missing
+The doctor checks Node, OpenCode 2.x, your OpenCode login and Claude Code,
+including the Claude Code version required for the custom model picker. It
+prints the exact install/update command for your OS and exits non-zero while a
+required item is missing. Every normal launch runs the same preflight: it stops
+with the same instructions instead of failing later inside the bridge. A missing
 OpenCode login is shown as a warning with `opencode auth login` guidance.
+
+Older Claude Code versions show only the active custom model in `/model`, even
+though the bridge catalog has more. If that happens, run `claude --version` and
+update to at least 2.1.242 (`claude update` for native installs). `o3c --doctor`
+also reports the generated picker count and warns if `~/.claude/settings.json`
+defines a conflicting `modelPicker`.
 
 ## Install
 
@@ -202,7 +210,7 @@ The launcher exports `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` from the catalog.
 
 **Harness mapping.** The launcher writes `claude-settings.json` with a
-`modelPicker` row per free model and `behavesAs: "claude-opus-4-8"` (override
+`modelPicker` row per free model and `behavesAs: "claude-opus-4-6"` (override
 with `OPENCODE_FREE_BEHAVES_AS`). This gives the harness a known Claude prompt
 profile/capability handling for the free model IDs; the actual ID sent is
 unchanged.
@@ -219,7 +227,7 @@ unchanged.
 | `OPENCODE_FREE_SERVICE_PASSWORD` | unset | password for that service |
 | `OPENCODE_FREE_DAILY_BUDGET` | `40` | local bridge requests/day; `0` disables |
 | `OPENCODE_FREE_DEFAULT_MODEL` | `deepseek-v4.1-flash-free` | default/fallback |
-| `OPENCODE_FREE_BEHAVES_AS` | `claude-opus-4-8` | Claude profile for picker rows |
+| `OPENCODE_FREE_BEHAVES_AS` | `claude-opus-4-6` | Claude profile for picker rows |
 | `OPENCODE_FREE_DATA_DIR` | platform data dir | data/dedicated home |
 | `OPENCODE_FREE_STATE_DIR` | platform state dir | logs, pid, catalog, usage |
 | `OPENCODE_FREE_BIN_DIR` | platform bin dir | installer target |

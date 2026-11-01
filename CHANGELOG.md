@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+- Require Claude Code 2.1.242+ for custom model-picker rows and show update
+  guidance when an older version is installed.
+- Regenerate `claude-settings.json` on `o3c --list` and report the picker row
+  count in `--doctor`; warn about a conflicting user-settings `modelPicker`.
+- Use `claude-opus-4-6` as the default `behavesAs` profile for wider
+  compatibility.
+
 ## 0.3.0
 
 - Rename the command from `claude-opencode` to `o3c`; the installer migrates an

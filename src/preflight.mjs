@@ -4,6 +4,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const MIN_NODE_MAJOR = 22;
+export const MIN_CLAUDE_VERSION = "2.1.242";
+export const RECOMMENDED_CLAUDE_VERSION = "2.1.257";
 export const URLS = {
   node: "https://nodejs.org/en/download",
   opencode: "https://opencode.ai/v2/docs",
@@ -18,6 +20,16 @@ export function numericVersion(value) {
 export function versionMajor(value) {
   const version = numericVersion(value);
   return version ? Number(version.split(".")[0]) : 0;
+}
+
+export function compareVersions(left, right) {
+  const a = String(numericVersion(left) || "0").split(".").map(Number);
+  const b = String(numericVersion(right) || "0").split(".").map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] || 0) - (b[index] || 0);
+    if (difference) return difference;
+  }
+  return 0;
 }
 
 function isExecutable(file, platform) {
@@ -137,6 +149,16 @@ export function installGuidance(id, { platform = process.platform, arch = proces
     }
     return lines;
   }
+  if (id === "claude-update") {
+    const lines = [
+      `Update Claude Code to ${MIN_CLAUDE_VERSION} or newer (${RECOMMENDED_CLAUDE_VERSION}+ recommended).`,
+      "Native install: claude update",
+    ];
+    if (platform === "darwin") lines.push("Homebrew: brew upgrade --cask claude-code");
+    if (platform === "win32") lines.push("WinGet: winget upgrade Anthropic.ClaudeCode");
+    lines.push("Or reinstall: https://code.claude.com/docs/en/setup");
+    return lines;
+  }
   if (id === "opencode-auth") {
     return [
       "Sign in to OpenCode Zen before using free models:",
@@ -156,7 +178,6 @@ export function checkPrerequisites({
   home = os.homedir(),
   needOpenCode = true,
   needClaude = true,
-  detailed = false,
   versionOf = commandVersion,
 } = {}) {
   const checks = [];
@@ -200,18 +221,29 @@ export function checkPrerequisites({
   if (needClaude) {
     const command = env.CLAUDE_BIN || "claude";
     const executable = findExecutable(command, { env, platform });
+    let ok = !!executable;
     let detail = executable || `not found (${command})`;
-    if (executable && detailed) {
+    if (executable) {
       const version = versionOf(executable, { platform });
-      if (version) detail = `${executable} (v${version})`;
+      if (version) {
+        detail = `${executable} (v${version})`;
+        if (compareVersions(version, MIN_CLAUDE_VERSION) < 0) {
+          ok = false;
+          detail = `${executable} (v${version}) - Claude Code ${MIN_CLAUDE_VERSION}+ required for the model picker`;
+        }
+      }
     }
     checks.push({
       id: "claude",
       label: "Claude Code",
       required: true,
-      ok: !!executable,
+      ok,
       detail,
-      fix: executable ? [] : installGuidance("claude", { platform }),
+      fix: !executable
+        ? installGuidance("claude", { platform })
+        : ok
+          ? []
+          : installGuidance("claude-update", { platform }),
     });
   }
 

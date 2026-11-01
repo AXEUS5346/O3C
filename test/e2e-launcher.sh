@@ -56,10 +56,19 @@ cat "$ROOT/list.out"
 grep -q "mock-deepseek-free" "$ROOT/list.out"
 grep -q "mock-glm-free" "$ROOT/list.out"
 grep -q "100,000" "$ROOT/list.out"
+grep -q "settings: .* (2 models)" "$ROOT/list.out"
 if grep -Eq "mock-paid|mock-deprecated-free|mock-go-free" "$ROOT/list.out"; then
   echo "FAIL: non-free model leaked into catalog"
   exit 1
 fi
+node -e '
+const fs = require("fs");
+const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if ((value.modelPicker.options || []).length !== 2) {
+  console.error("settings modelPicker does not match catalog");
+  process.exit(1);
+}
+' "$DATA/claude-settings.json"
 
 echo "== catalog updates every invocation =="
 curl -fsS "http://127.0.0.1:$MOCK_PORT/control/add-model" >/dev/null

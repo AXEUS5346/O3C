@@ -2,6 +2,7 @@
 // Cross-platform launcher for the O3C bridge. Starts the bridge, resolves the
 // live free-model catalog, then hands the terminal to Claude Code.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -24,7 +25,7 @@ const PORT = port();
 const SETTINGS_FILE = settingsPath();
 const PID_FILE = path.join(STATE_DIR, "bridge.pid");
 const SERVICE_STATE = path.join(STATE_DIR, "opencode-service.json");
-const DEFAULT_BEHAVES_AS = process.env.OPENCODE_FREE_BEHAVES_AS || "claude-opus-4-8";
+const DEFAULT_BEHAVES_AS = process.env.OPENCODE_FREE_BEHAVES_AS || "claude-opus-4-6";
 const PREFIX = "o3c";
 
 function sleep(ms) {
@@ -176,6 +177,10 @@ function printCatalog(catalog) {
   if (catalog.removed && catalog.removed.length) {
     console.log(`removed: ${catalog.removed.map((entry) => entry.id).join(", ")}`);
   }
+  if ((catalog.data || []).length === 1) {
+    console.log("note: this OpenCode account currently exposes only one free model.");
+    console.log("      Run: o3c --doctor");
+  }
   if (catalog.source !== "service") {
     console.log("note: live catalog was not ready; showing the fallback list.");
     console.log("      Run: o3c --doctor");
@@ -215,6 +220,28 @@ function writeSettings(catalog) {
   try {
     fs.chmodSync(SETTINGS_FILE, 0o600);
   } catch {}
+  return options.length;
+}
+
+function pickerInfo() {
+  try {
+    const value = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+    const options = value?.modelPicker?.options;
+    return { count: Array.isArray(options) ? options.length : 0 };
+  } catch {
+    return { count: 0 };
+  }
+}
+
+function userPickerPath() {
+  const base = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+  const file = path.join(base, "settings.json");
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8"));
+    return value && value.modelPicker ? file : null;
+  } catch {
+    return null;
+  }
 }
 
 function commandLineOf(pid) {
@@ -346,13 +373,18 @@ async function doctor() {
   const checks = checkPrerequisites({
     needOpenCode: needsOpenCode(),
     needClaude: true,
-    detailed: true,
   });
+  const picker = pickerInfo();
+  const conflicting = userPickerPath();
   console.log("O3C doctor");
   console.log(`  platform: ${process.platform} ${process.arch}`);
   console.log(`  node:     ${process.version}`);
   console.log(`  data:     ${DATA_DIR}`);
   console.log(`  state:    ${STATE_DIR}`);
+  console.log(`  picker:   ${SETTINGS_FILE} (${picker.count} models)`);
+  if (conflicting) {
+    console.log(`  warning:  ${conflicting} also defines modelPicker and may override O3C.`);
+  }
   console.log("");
   console.log(formatPrerequisites(checks));
   const running = await bridgeHealthy(2000);
@@ -390,7 +422,10 @@ async function main() {
     if (arg === "-l" || arg === "--list") {
       preflight({ needClaude: false });
       await startBridge();
-      printCatalog(requireCatalog(await fetchCatalog(true)));
+      const catalog = requireCatalog(await fetchCatalog(true));
+      printCatalog(catalog);
+      const count = writeSettings(catalog);
+      console.log(`settings: ${SETTINGS_FILE} (${count} models)`);
       return;
     }
     if (arg === "--doctor") {
@@ -429,8 +464,8 @@ async function main() {
   await startBridge();
   const catalog = requireCatalog(await fetchCatalog(true));
   const model = resolveRequested(catalog, requested);
-  writeSettings(catalog);
-  console.error(`[${PREFIX}] model=${model.alias || model.id} (${model.id}) ctx=${model.context_window} out=${model.max_output_tokens} bridge=${BASE}`);
+  const count = writeSettings(catalog);
+  console.error(`[${PREFIX}] model=${model.alias || model.id} (${model.id}) ctx=${model.context_window} out=${model.max_output_tokens} picker=${count} bridge=${BASE}`);
   await launchClaude(model, ["--settings", SETTINGS_FILE, "--model", model.id, ...passthrough]);
 }
 

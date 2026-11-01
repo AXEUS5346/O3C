@@ -104,6 +104,22 @@ test("flags Node older than 22 and OpenCode 1.x", () => {
   assert.match(opencode.detail, /requires OpenCode 2\.x/);
 });
 
+test("requires a Claude Code version with model picker support", () => {
+  fakeCommand("claude");
+  const checks = checkPrerequisites({
+    env: { PATH: BIN, XDG_DATA_HOME: path.join(HOME, "no-auth") },
+    platform: process.platform,
+    home: HOME,
+    nodeVersion: "22.1.0",
+    needOpenCode: false,
+    versionOf: () => "2.1.200",
+  });
+  const claude = checks.find((check) => check.id === "claude");
+  assert.equal(claude.ok, false);
+  assert.match(claude.detail, /2\.1\.242\+ required/);
+  assert.match(formatPrerequisites(checks), /Update Claude Code to 2\.1\.242/);
+});
+
 test("detects an existing OpenCode login", () => {
   const data = path.join(HOME, "auth-data");
   fs.mkdirSync(path.join(data, "opencode"), { recursive: true });
