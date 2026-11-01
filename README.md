@@ -171,6 +171,8 @@ source: service   updated: 2026-11-01T...   default: deepseek-v4.1-flash-free
 - Removed models disappear and are listed under `removed:`.
 - **Every launch and every `--list` re-reads the live catalog**, including
   context/output limits and vision capability.
+- The last main model you use is remembered in `<state>/last-model.json`; new
+  launches reuse it, and Claude Code’s background requests follow it.
 - Background refresh every 5 minutes; a models.dev drift check every 15 minutes.
 - Real `limit.context/input/output` and vision capability come from the runtime.
 

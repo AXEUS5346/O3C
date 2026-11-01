@@ -75,6 +75,7 @@ const DAILY_BUDGET = (() => {
   return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 40;
 })();
 const USAGE_FILE = path.join(stateDir(), "usage.json");
+const LAST_MODEL_FILE = path.join(stateDir(), "last-model.json");
 
 function utcDayKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
@@ -105,6 +106,28 @@ function writeUsage(value) {
     logError(`usage: could not write usage file: ${error.message}`);
   }
 }
+
+function readLastModel() {
+  try {
+    const value = JSON.parse(fs.readFileSync(LAST_MODEL_FILE, "utf8"));
+    return typeof value?.model === "string" && value.model ? value.model : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberModel(modelId) {
+  try {
+    fs.mkdirSync(stateDir(), { recursive: true });
+    const temp = `${LAST_MODEL_FILE}.tmp-${process.pid}`;
+    fs.writeFileSync(temp, JSON.stringify({ model: modelId, updated_at: new Date().toISOString() }), { mode: 0o600 });
+    fs.renameSync(temp, LAST_MODEL_FILE);
+  } catch (error) {
+    logError(`model memory: could not write ${LAST_MODEL_FILE}: ${error.message}`);
+  }
+}
+
+let lastMainModel = readLastModel();
 
 function usageInfo() {
   const usage = readUsage();
@@ -1085,7 +1108,16 @@ async function runServicePrompt(state, { sessionID, prompt, signal, onDelta, onA
 }
 
 async function handleServiceMessages(body, res) {
-  const modelId = resolveModel(body.model);
+  const hasTools = (body.tools || []).length > 0;
+  let modelId = resolveModel(body.model);
+  if (hasTools) {
+    if (modelId !== lastMainModel) {
+      lastMainModel = modelId;
+      rememberModel(modelId);
+    }
+  } else if (lastMainModel && getCatalogModel(lastMainModel)) {
+    modelId = lastMainModel;
+  }
   const prompt = buildServicePrompt(body, modelId);
   const estimateInput = estimateTokens(prompt);
   const stream = !!body.stream;
@@ -2061,6 +2093,7 @@ export function createServer() {
         opencode: TRANSPORT === "service" ? (serviceState ? "ready" : "starting") : "direct",
         models: catalog.models.map((model) => model.id),
         default: catalog.defaultId,
+        last_model: lastMainModel,
         catalog: {
           source: catalog.source,
           updated_at: catalog.updatedAt,

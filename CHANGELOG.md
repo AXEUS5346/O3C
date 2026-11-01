@@ -15,6 +15,9 @@
 - Clarify that Claude Code tools are allowed while OpenCode's internal tools are
   not, so models stop treating Bash as forbidden.
 - Add `o3c update` and `o3c update --check` for npm, GitHub and source installs.
+- Remember the last main model, reuse it for new launches, and route background
+  requests to it so `/model` selection is consistent and does not silently keep
+  using the launch-time model.
 - Exclude localhost from proxies for bridge and Claude Code child processes and
   warn about proxy settings in `--doctor`.
 - Put the bridge URL/auth in the generated `--settings` file so stale Claude

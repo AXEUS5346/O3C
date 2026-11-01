@@ -76,7 +76,7 @@ Paths come from `src/paths.mjs`; `OPENCODE_FREE_DATA_DIR` and
 - `<data>/opencode-home/` — dedicated OpenCode home/DB/auth copy
 - `<data>/claude-settings.json` — generated picker
 - `<state>/` — bridge.log, opencode-service.log/json, catalog.json, usage.json,
-  bridge.pid, workdir
+  last-model.json, bridge.pid, workdir
 
 Linux defaults to XDG paths, macOS to `~/Library/Application Support`, and
 Windows to `%LOCALAPPDATA%`. The state directory is under the data directory on

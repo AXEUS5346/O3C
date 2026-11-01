@@ -90,11 +90,43 @@ cat "$ROOT/text.out"
 grep -q "PONG" "$ROOT/text.out" || { echo "FAIL text"; cat "$ROOT/text.err"; exit 1; }
 grep -q "ctx=123000" "$ROOT/text.err" || { echo "FAIL: launch did not refresh catalog context"; cat "$ROOT/text.err"; exit 1; }
 
+echo "== model memory =="
+node -e '
+const fs = require("fs");
+const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (value.model !== "mock-glm-free") {
+  console.error("last model was not recorded: " + JSON.stringify(value));
+  process.exit(1);
+}
+' "$STATE/last-model.json"
+timeout 120 "$LAUNCHER" -p "Reply with exactly PONG" >"$ROOT/memory.out" 2>"$ROOT/memory.err"
+grep -q "PONG" "$ROOT/memory.out" || { echo "FAIL: remembered-model call"; cat "$ROOT/memory.err"; exit 1; }
+grep -q "model=mock-glm" "$ROOT/memory.err" || { echo "FAIL: launcher did not reuse last model"; cat "$ROOT/memory.err"; exit 1; }
+
 echo "== claude tool round-trip through installed launcher =="
 timeout 120 "$LAUNCHER" -m mock-deepseek-free -p tooltest --allowedTools Read >"$ROOT/tool.out" 2>"$ROOT/tool.err"
 cat "$ROOT/tool.out"
 grep -q "TOOL_RESULT_SEEN" "$ROOT/tool.out" || { echo "FAIL tool"; cat "$ROOT/tool.err"; exit 1; }
 grep -q "archlinux" "$ROOT/tool.out" || { echo "FAIL tool content"; cat "$ROOT/tool.err"; exit 1; }
+node -e '
+const fs = require("fs");
+const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (value.model !== "mock-deepseek-free") {
+  console.error("last model was not updated: " + JSON.stringify(value));
+  process.exit(1);
+}
+' "$STATE/last-model.json"
+
+echo "== background requests follow the main model =="
+curl -sS --max-time 60 "http://127.0.0.1:$BRIDGE_PORT/v1/messages" -H 'content-type: application/json' \
+  -d '{"model":"mock-glm-free","messages":[{"role":"user","content":"background"}]}' >"$ROOT/background.out"
+cat "$ROOT/background.out"
+grep -q "PONG" "$ROOT/background.out" || { echo "FAIL background request"; cat "$ROOT/background.out"; exit 1; }
+grep -q "service model=mock-glm-free -> mock-deepseek-free .*tools=0" "$STATE/bridge.log" || {
+  echo "FAIL: background model did not follow last main model"
+  tail -n 20 "$STATE/bridge.log"
+  exit 1
+}
 
 echo "== streaming =="
 curl -sN --max-time 60 "http://127.0.0.1:$BRIDGE_PORT/v1/messages" -H 'content-type: application/json' \
@@ -110,8 +142,8 @@ process.stdin.on("data", (d) => s += d).on("end", () => {
   const health = JSON.parse(s);
   const usage = health.usage || {};
   if (usage.budget !== 40) { console.error("budget not 40: " + JSON.stringify(usage)); process.exit(1); }
-  if (!(usage.used >= 3)) { console.error("usage not counted: " + JSON.stringify(usage)); process.exit(1); }
-  if (!(usage.by_model && usage.by_model["mock-deepseek-free"] >= 2 && usage.by_model["mock-glm-free"] >= 1)) {
+  if (!(usage.used >= 6)) { console.error("usage not counted: " + JSON.stringify(usage)); process.exit(1); }
+  if (!(usage.by_model && usage.by_model["mock-deepseek-free"] >= 3 && usage.by_model["mock-glm-free"] >= 2)) {
     console.error("per-model usage missing: " + JSON.stringify(usage));
     process.exit(1);
   }

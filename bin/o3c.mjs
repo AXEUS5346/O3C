@@ -27,6 +27,7 @@ const PORT = port();
 const SETTINGS_FILE = settingsPath();
 const PID_FILE = path.join(STATE_DIR, "bridge.pid");
 const SERVICE_STATE = path.join(STATE_DIR, "opencode-service.json");
+const LAST_MODEL_FILE = path.join(STATE_DIR, "last-model.json");
 const DEFAULT_BEHAVES_AS = process.env.OPENCODE_FREE_BEHAVES_AS || "claude-opus-4-6";
 const PREFIX = "o3c";
 
@@ -191,7 +192,16 @@ function printCatalog(catalog) {
   }
 }
 
-function resolveRequested(catalog, requested) {
+function readLastModel() {
+  try {
+    const value = JSON.parse(fs.readFileSync(LAST_MODEL_FILE, "utf8"));
+    return typeof value?.model === "string" && value.model ? value.model : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveRequested(catalog, requested, allowFallback = false) {
   const wanted = String(requested || "").trim().toLowerCase();
   const data = catalog.data || [];
   let model;
@@ -202,6 +212,10 @@ function resolveRequested(catalog, requested) {
       String(entry.id).toLowerCase() === wanted ||
       String(entry.alias || "").toLowerCase() === wanted ||
       (entry.aliases || []).some((alias) => String(alias).toLowerCase() === wanted));
+  }
+  if (!model && allowFallback) {
+    model = data.find((entry) => entry.id === catalog.default) || data[0];
+    if (model) console.error(`${PREFIX}: saved model "${requested}" is no longer available; using ${model.id}`);
   }
   if (!model) {
     console.error(`${PREFIX}: model "${requested}" is not in the current free catalog.`);
@@ -435,6 +449,14 @@ async function doctor() {
 
 async function main() {
   let requested = process.env.OPENCODE_FREE_MODEL || "";
+  let requestedFromMemory = false;
+  if (!requested) {
+    const saved = readLastModel();
+    if (saved) {
+      requested = saved;
+      requestedFromMemory = true;
+    }
+  }
   const passthrough = [];
   const argv = process.argv.slice(2);
   if (argv[0] === "update") {
@@ -502,7 +524,7 @@ async function main() {
   preflight({ needClaude: true });
   await startBridge();
   const catalog = requireCatalog(await fetchCatalog(true));
-  const model = resolveRequested(catalog, requested);
+  const model = resolveRequested(catalog, requested, requestedFromMemory);
   const count = writeSettings(catalog, model);
   console.error(`[${PREFIX}] model=${model.alias || model.id} (${model.id}) ctx=${model.context_window} out=${model.max_output_tokens} picker=${count} bridge=${BASE}`);
   await launchClaude(model, ["--settings", SETTINGS_FILE, "--model", model.id, ...passthrough]);
