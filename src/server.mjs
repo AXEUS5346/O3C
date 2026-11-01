@@ -778,6 +778,7 @@ export function buildServicePrompt(body, modelId) {
     "These listed tools are Claude Code tools and are allowed. OpenCode's own internal tools are disabled and must not be called directly.",
     "Bash is a real, working Claude Code tool when listed. Never claim that Bash or another listed tool is unavailable.",
     "For any request that requires inspecting files, the machine, an install, or running a command, call the appropriate tool with the JSON protocol before answering.",
+    "Do not use provider-native function calling or tool_calls. Only the plain-text JSON protocol below is allowed.",
     "To call exactly one Claude Code tool, output only one JSON object and nothing else:",
     '{"tool_use":{"name":"<tool_name>","input":{...}}}',
     "Example: to inspect settings with Bash, output exactly:",

@@ -231,6 +231,7 @@ test("tells models that listed tools are available and should be used", () => {
   assert.match(prompt, /Never claim that Bash or another listed tool is unavailable/);
   assert.match(prompt, /call the appropriate tool with the JSON protocol/);
   assert.match(prompt, /Example: to inspect settings with Bash/);
+  assert.match(prompt, /Do not use provider-native function calling or tool_calls/);
   assert.match(prompt, /Tool results marked without \[tool error\] are successful/);
 });
 
