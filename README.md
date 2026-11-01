@@ -119,6 +119,20 @@ o3c --stop
 The first launch starts a dedicated OpenCode service in the background. Your
 own OpenCode TUI/config is untouched.
 
+## Troubleshooting
+
+- **Only the active model appears in `/model`**: Claude Code older than 2.1.242
+  ignores `modelPicker`. Run `claude update` (or reinstall Claude Code), then
+  relaunch `o3c`. `o3c --doctor` now reports the version and picker row count.
+- **`API Error: Connection refused`**: Claude Code cannot reach the local
+  bridge. Launch through `o3c`, then check `o3c --status` and `o3c --log`. If
+  the bridge is not running, run `o3c --stop` and `o3c --list` and inspect the
+  reported error. Do not run plain `claude` with a stale `ANTHROPIC_BASE_URL`.
+- **A model says the Bash tool is unavailable**: O3C forwards the complete
+  Claude Code tool set. Verify the session was launched with `o3c` and that
+  Bash is not denied by Claude Code permissions. Test with
+  `o3c -p "Use the Bash tool to run echo HARNESS_OK" --allowedTools Bash`.
+
 ## Dynamic catalog
 
 The catalog is read from the running OpenCode service (`/api/model`), filtered
