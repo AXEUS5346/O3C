@@ -129,6 +129,18 @@ function rememberModel(modelId) {
 
 let lastMainModel = readLastModel();
 
+export function cacheUsage(usage = {}) {
+  const cache = usage.cache || {};
+  const details = usage.prompt_tokens_details || {};
+  const read = Number(
+    cache.read ?? cache.read_tokens ?? usage.cache_read_input_tokens ?? details.cached_tokens ?? 0,
+  ) || 0;
+  const write = Number(
+    cache.write ?? cache.write_tokens ?? usage.cache_creation_input_tokens ?? 0,
+  ) || 0;
+  return { read, write };
+}
+
 function usageInfo() {
   const usage = readUsage();
   const reset = nextUtcMidnight();
@@ -1251,6 +1263,7 @@ async function handleServiceMessages(body, res) {
     }
 
     const tokens = result.usage || {};
+    const cache = cacheUsage(tokens);
     const inputTokens = tokens.input || estimateInput;
     const outputTokens = tokens.output || estimateTokens(result.text || "");
 
@@ -1277,6 +1290,8 @@ async function handleServiceMessages(body, res) {
       const message = buildAnthropicMessage(parsed.text, parsed.toolCalls, modelId, estimateInput);
       message.usage.input_tokens = inputTokens;
       message.usage.output_tokens = outputTokens;
+      message.usage.cache_creation_input_tokens = cache.write;
+      message.usage.cache_read_input_tokens = cache.read;
       sendJson(res, 200, message);
       return;
     }
@@ -1292,7 +1307,12 @@ async function handleServiceMessages(body, res) {
         });
       });
       stopKeepAlive();
-      activeWriter.finish("tool_calls", { prompt_tokens: inputTokens, completion_tokens: outputTokens });
+      activeWriter.finish("tool_calls", {
+        prompt_tokens: inputTokens,
+        completion_tokens: outputTokens,
+        cache_creation_input_tokens: cache.write,
+        cache_read_input_tokens: cache.read,
+      });
     } else {
       if (textMode !== true) {
         const out = parsed.text || text;
@@ -1302,6 +1322,8 @@ async function handleServiceMessages(body, res) {
       activeWriter.finish(result.finishReason === "length" ? "length" : "stop", {
         prompt_tokens: inputTokens,
         completion_tokens: outputTokens,
+        cache_creation_input_tokens: cache.write,
+        cache_read_input_tokens: cache.read,
       });
     }
   } catch (error) {
@@ -1635,6 +1657,7 @@ export function openAIToAnthropic(json, modelId, estimateInput = 0) {
   if (!content.length && message.reasoning_content) content.push({ type: "text", text: String(message.reasoning_content) });
   if (!content.length) content.push({ type: "text", text: "" });
   const usage = json.usage || {};
+  const cache = cacheUsage(usage);
   return {
     id: json.id || `msg_${randomHex(12)}`,
     type: "message",
@@ -1646,8 +1669,8 @@ export function openAIToAnthropic(json, modelId, estimateInput = 0) {
     usage: {
       input_tokens: usage.prompt_tokens || estimateInput,
       output_tokens: usage.completion_tokens || 0,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: cache.write,
+      cache_read_input_tokens: cache.read,
     },
   };
 }
@@ -1826,10 +1849,16 @@ export function createSseWriter(res, modelId, estimateInput) {
       const stopReason = mapStopReason(finishReason, toolBlocks.size > 0);
       const inputTokens = usage.prompt_tokens || estimateInput;
       const outputTokens = usage.completion_tokens || Math.ceil(outputChars / 4);
+      const cache = cacheUsage(usage);
       write("message_delta", {
         type: "message_delta",
         delta: { stop_reason: stopReason, stop_sequence: null },
-        usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+        usage: {
+          input_tokens: inputTokens,
+          output_tokens: outputTokens,
+          cache_creation_input_tokens: cache.write,
+          cache_read_input_tokens: cache.read,
+        },
       });
       write("message_stop", { type: "message_stop" });
       closed = true;

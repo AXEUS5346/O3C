@@ -18,6 +18,9 @@
 - Remember the last main model, reuse it for new launches, and route background
   requests to it so `/model` selection is consistent and does not silently keep
   using the launch-time model.
+- Forward prompt-cache read/creation token usage from OpenCode into Anthropic
+  responses and keep the cacheable prefix stable.
+- Require `O3C_ALLOW_LIVE=1` before live quota-consuming tests run.
 - Exclude localhost from proxies for bridge and Claude Code child processes and
   warn about proxy settings in `--doctor`.
 - Put the bridge URL/auth in the generated `--settings` file so stale Claude

@@ -122,6 +122,14 @@ curl -sS --max-time 60 "http://127.0.0.1:$BRIDGE_PORT/v1/messages" -H 'content-t
   -d '{"model":"mock-glm-free","messages":[{"role":"user","content":"background"}]}' >"$ROOT/background.out"
 cat "$ROOT/background.out"
 grep -q "PONG" "$ROOT/background.out" || { echo "FAIL background request"; cat "$ROOT/background.out"; exit 1; }
+node -e '
+const fs = require("fs");
+const message = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+if (message.usage?.cache_read_input_tokens !== 80 || message.usage?.cache_creation_input_tokens !== 20) {
+  console.error("prompt cache usage missing: " + JSON.stringify(message.usage));
+  process.exit(1);
+}
+' "$ROOT/background.out"
 grep -q "service model=mock-glm-free -> mock-deepseek-free .*tools=0" "$STATE/bridge.log" || {
   echo "FAIL: background model did not follow last main model"
   tail -n 20 "$STATE/bridge.log"
@@ -134,6 +142,7 @@ curl -sN --max-time 60 "http://127.0.0.1:$BRIDGE_PORT/v1/messages" -H 'content-t
 deltas="$(grep -c 'event: content_block_delta' "$ROOT/stream.out" || true)"
 echo "content_block_delta events: $deltas"
 [ "$deltas" -ge 2 ] || { echo "FAIL streaming"; cat "$ROOT/stream.out"; exit 1; }
+grep -q '"cache_read_input_tokens":80' "$ROOT/stream.out" || { echo "FAIL streaming cache usage"; cat "$ROOT/stream.out"; exit 1; }
 
 echo "== usage =="
 curl -fsS "http://127.0.0.1:$BRIDGE_PORT/health" | node -e '

@@ -3,6 +3,12 @@
 # Models are read dynamically from the catalog; one free request per model.
 set -euo pipefail
 
+if [ "${O3C_ALLOW_LIVE:-}" != "1" ]; then
+  echo "Live smoke is disabled because it consumes real free-model quota."
+  echo "Set O3C_ALLOW_LIVE=1 explicitly when you intend to run it."
+  exit 0
+fi
+
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${SMOKE_PORT:-8789}"
 PID=""

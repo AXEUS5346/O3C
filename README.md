@@ -241,6 +241,12 @@ next request. OpenCode's tools are not used.
 The launcher exports `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and
 `CLAUDE_CODE_MAX_OUTPUT_TOKENS` from the catalog.
 
+**Prompt cache.** O3C accepts Claude Code’s cacheable requests and forwards the
+cache-read/cache-creation token counts reported by OpenCode into Anthropic
+`usage.cache_*` fields. The static tool/system prefix is kept stable at the top
+of the prompt to maximize provider-side cache hits. Actual caching depends on
+the upstream model; free models may not support prompt caching.
+
 **Harness mapping.** The launcher writes `claude-settings.json` with a
 `modelPicker` row per free model and `behavesAs: "claude-opus-4-6"` (override
 with `OPENCODE_FREE_BEHAVES_AS`). This gives the harness a known Claude prompt
@@ -276,8 +282,11 @@ npm run test:install     # cross-platform installer tests only
 npm run test:direct      # Claude Code <-> bridge <-> OpenAI mock (no quota)
 npm run test:service     # Claude Code <-> bridge <-> mock OpenCode service (no quota)
 npm run test:launcher    # installed shim + mock service + Claude Code (no quota)
-npm run test:live        # one request per current free model (uses quota!)
+O3C_ALLOW_LIVE=1 npm run test:live   # real quota; opt-in only
 ```
+
+Live smoke is blocked unless `O3C_ALLOW_LIVE=1` is set. Use the mock tests for
+routine verification; they do not consume free-model quota.
 
 `test:launcher` installs into a temporary bin directory, starts the bridge
 through that shim against a mock OpenCode service, then verifies the dynamic

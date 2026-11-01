@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol } from "../src/server.mjs";
+import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, cacheUsage } from "../src/server.mjs";
 
 test("resolves aliases and full ids; unknown Anthropic names fall back to default", () => {
   assert.equal(resolveModel("deepseek"), "deepseek-v4.1-flash-free");
@@ -215,6 +215,13 @@ test("text-only stream closes with end_turn", () => {
     res.events.filter((event) => event.event === "content_block_start").map((event) => event.data.content_block.type),
     ["text"],
   );
+});
+
+test("extracts prompt-cache usage from service and OpenAI shapes", () => {
+  assert.deepEqual(cacheUsage({ input: 120, cache: { read: 80, write: 20 } }), { read: 80, write: 20 });
+  assert.deepEqual(cacheUsage({ prompt_tokens: 120, prompt_tokens_details: { cached_tokens: 64 } }), { read: 64, write: 0 });
+  assert.deepEqual(cacheUsage({ cache_read_input_tokens: 50, cache_creation_input_tokens: 10 }), { read: 50, write: 10 });
+  assert.deepEqual(cacheUsage({}), { read: 0, write: 0 });
 });
 
 test("tells models that listed tools are available and should be used", () => {

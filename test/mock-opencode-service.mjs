@@ -129,10 +129,13 @@ async function emitPrompt(sessionID, text) {
     data: {
       sessionID,
       finish: isTool ? "tool_calls" : "stop",
-      tokens: { input: 120, output: Math.ceil(text.length / 4), reasoning: 0, cache: { read: 0, write: 0 } },
+      tokens: { input: 120, output: Math.ceil(text.length / 4), reasoning: 0, cache: { read: 80, write: 20 } },
     },
   });
-  broadcast({ type: "session.usage.updated", data: { sessionID, tokens: { input: 120, output: Math.ceil(text.length / 4) } } });
+  broadcast({
+    type: "session.usage.updated",
+    data: { sessionID, tokens: { input: 120, output: Math.ceil(text.length / 4), cache: { read: 80, write: 20 } } },
+  });
   broadcast({ type: "session.execution.succeeded", data: { sessionID } });
 }
 
