@@ -1,6 +1,6 @@
 {
   "name": "@axeus/o3c",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Claude Code bridge for OpenCode free models: dynamic catalog, real context, streaming, and Claude harness mapping.",
   "type": "module",
   "bin": {

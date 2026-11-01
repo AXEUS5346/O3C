@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2
+
+- Forward prompt-cache read/creation usage and keep the cacheable prefix stable.
+- Persist the last main model across launches and route background requests to it.
+- Ban provider-native tool calls and fix multi-tool streaming.
+- Add `o3c update`/`--check`, localhost proxy bypass, bridge settings override,
+  and Claude Code model-picker version guidance.
+- Require `O3C_ALLOW_LIVE=1` before quota-consuming live tests.
+
 ## 0.3.1
 
 - Require Claude Code 2.1.242+ for custom model-picker rows and show update
