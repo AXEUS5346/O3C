@@ -212,7 +212,7 @@ function resolveRequested(catalog, requested) {
   return model;
 }
 
-function writeSettings(catalog) {
+function writeSettings(catalog, model = null) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const options = (catalog.data || []).map((model) => ({
     model: model.id,
@@ -220,7 +220,20 @@ function writeSettings(catalog) {
     description: `OpenCode free · ${formatInt(model.context_window)} ctx · ${formatInt(model.max_output_tokens)} out${model.vision ? " · vision" : ""}`,
     behavesAs: DEFAULT_BEHAVES_AS,
   }));
-  fs.writeFileSync(SETTINGS_FILE, `${JSON.stringify({ modelPicker: { replaceBuiltInOptions: false, options } }, null, 2)}\n`, { mode: 0o600 });
+  const env = {
+    ANTHROPIC_BASE_URL: BASE,
+    ANTHROPIC_AUTH_TOKEN: "opencode-free",
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  };
+  if (model) {
+    env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(model.context_window || 200000);
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(model.max_output_tokens || 32000);
+  }
+  fs.writeFileSync(
+    SETTINGS_FILE,
+    `${JSON.stringify({ modelPicker: { replaceBuiltInOptions: false, options }, env }, null, 2)}\n`,
+    { mode: 0o600 },
+  );
   try {
     fs.chmodSync(SETTINGS_FILE, 0o600);
   } catch {}
@@ -237,15 +250,19 @@ function pickerInfo() {
   }
 }
 
-function userPickerPath() {
+function userSettings() {
   const base = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
   const file = path.join(base, "settings.json");
   try {
-    const value = JSON.parse(fs.readFileSync(file, "utf8"));
-    return value && value.modelPicker ? file : null;
+    return { file, value: JSON.parse(fs.readFileSync(file, "utf8")) };
   } catch {
-    return null;
+    return { file, value: null };
   }
+}
+
+function userPickerPath() {
+  const { file, value } = userSettings();
+  return value && value.modelPicker ? file : null;
 }
 
 function commandLineOf(pid) {
@@ -335,23 +352,25 @@ function claudeSpawnSpec(args) {
 
 async function launchClaude(model, args) {
   const spec = claudeSpawnSpec(args);
+  const env = {
+    ...process.env,
+    ...localNoProxy(process.env),
+    ANTHROPIC_BASE_URL: BASE,
+    ANTHROPIC_AUTH_TOKEN: "opencode-free",
+    ANTHROPIC_MODEL: model.id,
+    ANTHROPIC_SMALL_FAST_MODEL: model.id,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model.id,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model.id,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model.id,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(model.context_window || 200000),
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(model.max_output_tokens || 32000),
+  };
+  delete env.ANTHROPIC_API_KEY;
   const child = spawn(spec.command, spec.args, {
     shell: spec.shell,
     stdio: "inherit",
-    env: {
-      ...process.env,
-      ...localNoProxy(process.env),
-      ANTHROPIC_BASE_URL: BASE,
-      ANTHROPIC_AUTH_TOKEN: "opencode-free",
-      ANTHROPIC_MODEL: model.id,
-      ANTHROPIC_SMALL_FAST_MODEL: model.id,
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: model.id,
-      ANTHROPIC_DEFAULT_SONNET_MODEL: model.id,
-      ANTHROPIC_DEFAULT_OPUS_MODEL: model.id,
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(model.context_window || 200000),
-      CLAUDE_CODE_MAX_OUTPUT_TOKENS: String(model.max_output_tokens || 32000),
-    },
+    env,
   });
   child.on("error", (error) => {
     const fix = installGuidance("claude", { platform: process.platform }).join("\n");
@@ -389,6 +408,13 @@ async function doctor() {
   console.log(`  picker:   ${SETTINGS_FILE} (${picker.count} models)`);
   if (conflicting) {
     console.log(`  warning:  ${conflicting} also defines modelPicker and may override O3C.`);
+  }
+  const userEnv = userSettings().value?.env || {};
+  if (userEnv.ANTHROPIC_BASE_URL && userEnv.ANTHROPIC_BASE_URL !== BASE) {
+    console.log(`  warning:  user settings set ANTHROPIC_BASE_URL=${userEnv.ANTHROPIC_BASE_URL}; O3C settings override it.`);
+  }
+  if (userEnv.ANTHROPIC_API_KEY) {
+    console.log("  warning:  user settings set ANTHROPIC_API_KEY; O3C uses ANTHROPIC_AUTH_TOKEN.");
   }
   const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
   const noProxy = process.env.NO_PROXY || process.env.no_proxy || "";
@@ -477,7 +503,7 @@ async function main() {
   await startBridge();
   const catalog = requireCatalog(await fetchCatalog(true));
   const model = resolveRequested(catalog, requested);
-  const count = writeSettings(catalog);
+  const count = writeSettings(catalog, model);
   console.error(`[${PREFIX}] model=${model.alias || model.id} (${model.id}) ctx=${model.context_window} out=${model.max_output_tokens} picker=${count} bridge=${BASE}`);
   await launchClaude(model, ["--settings", SETTINGS_FILE, "--model", model.id, ...passthrough]);
 }

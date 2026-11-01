@@ -17,6 +17,9 @@
 - Add `o3c update` and `o3c update --check` for npm, GitHub and source installs.
 - Exclude localhost from proxies for bridge and Claude Code child processes and
   warn about proxy settings in `--doctor`.
+- Put the bridge URL/auth in the generated `--settings` file so stale Claude
+  Code gateway settings cannot override O3C, and remove `ANTHROPIC_API_KEY`
+  from the child environment.
 
 ## 0.3.0
 

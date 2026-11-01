@@ -141,7 +141,9 @@ own OpenCode TUI/config is untouched.
   In WSL, a container, or a sandbox, run O3C in the same network namespace as
   Claude Code; `127.0.0.1` is not shared across namespaces. If a proxy is set,
   keep `127.0.0.1` and `localhost` in `NO_PROXY` (O3C adds them automatically
-  to its own child processes).
+  to its own child processes). O3C also writes the bridge URL/auth into the
+  generated `--settings` file, so a stale Claude Code gateway URL cannot
+  override it; `o3c --doctor` warns if it finds one.
 - **A model says the Bash tool is unavailable**: O3C forwards the complete
   Claude Code tool set. Verify the session was launched with `o3c` and that
   Bash is not denied by Claude Code permissions. Test with

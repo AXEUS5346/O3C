@@ -68,7 +68,11 @@ if ((value.modelPicker.options || []).length !== 2) {
   console.error("settings modelPicker does not match catalog");
   process.exit(1);
 }
-' "$DATA/claude-settings.json"
+if (value.env?.ANTHROPIC_BASE_URL !== process.argv[2]) {
+  console.error("settings bridge URL mismatch: " + JSON.stringify(value.env));
+  process.exit(1);
+}
+' "$DATA/claude-settings.json" "http://127.0.0.1:$BRIDGE_PORT"
 
 echo "== catalog updates every invocation =="
 curl -fsS "http://127.0.0.1:$MOCK_PORT/control/add-model" >/dev/null
