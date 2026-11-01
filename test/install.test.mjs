@@ -83,6 +83,11 @@ test("installed shim runs the launcher without starting the bridge", () => {
   const log = runShim(["--log"]);
   assert.equal(log.status, 0, log.stderr);
   assert.equal(log.stdout.trim(), path.join(STATE, "bridge.log"));
+
+  const update = runShim(["update", "--help"]);
+  assert.equal(update.status, 0, update.stderr);
+  assert.match(update.stdout, /Update O3C in place/);
+  assert.match(update.stdout, /o3c update --check/);
 });
 
 test("doctor explains missing prerequisites and how to install them", () => {

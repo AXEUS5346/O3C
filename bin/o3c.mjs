@@ -14,6 +14,7 @@ import {
   installGuidance,
   missingRequired,
 } from "../src/preflight.mjs";
+import { updateSelf } from "../src/self-update.mjs";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = path.join(REPO_ROOT, "src", "server.mjs");
@@ -38,6 +39,7 @@ function usage() {
 Options:
   -m, --model <name>   Model alias or full ID (default: bridge default)
   -l, --list           Refresh and list current free OpenCode models
+      update           Update O3C itself (o3c update --check)
       --doctor         Check Node, OpenCode, login and Claude Code, with fixes
       --status         Show bridge, transport and catalog status
       --stop           Stop the bridge and its dedicated OpenCode service
@@ -401,6 +403,9 @@ async function main() {
   let requested = process.env.OPENCODE_FREE_MODEL || "";
   const passthrough = [];
   const argv = process.argv.slice(2);
+  if (argv[0] === "update") {
+    process.exit(await updateSelf({ repoRoot: REPO_ROOT, args: argv.slice(1) }));
+  }
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];

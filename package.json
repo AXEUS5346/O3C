@@ -9,8 +9,9 @@
   "scripts": {
     "start": "node src/server.mjs",
     "install:o3c": "node scripts/install.mjs",
-    "test": "node --test test/preflight.test.mjs test/translate.test.mjs test/install.test.mjs test/package.test.mjs",
+    "test": "node --test test/preflight.test.mjs test/translate.test.mjs test/install.test.mjs test/package.test.mjs test/update.test.mjs",
     "test:preflight": "node --test test/preflight.test.mjs",
+    "test:update": "node --test test/update.test.mjs",
     "test:translate": "node --test test/translate.test.mjs",
     "test:install": "node --test test/install.test.mjs",
     "test:package": "node --test test/package.test.mjs",

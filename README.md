@@ -93,8 +93,16 @@ The source installer creates the runtime directories and prints a PATH hint if
 the bin directory is not on PATH. It does **not** modify
 `~/.claude/settings.json` or `~/.config/opencode`.
 
-Keep a global install current with `npm update -g @axeus/o3c` (or `git pull` in a
-source checkout). An existing `claude-opencode` shim from an older release is
+Keep O3C current with:
+
+```bash
+o3c update --check
+o3c update
+```
+
+It detects npm, GitHub and source installs, updates in place, and refuses to
+pull a source checkout with uncommitted changes. Restart sessions afterward with
+`o3c --stop && o3c`. An existing `claude-opencode` shim from an older release is
 migrated automatically by the source installer.
 
 Platform data locations:
@@ -113,6 +121,8 @@ o3c --list                                # refresh + list current free models
 o3c -m deepseek -p "hello"                # one-shot
 o3c -m glm                                # interactive
 o3c --status                              # bridge, transport, catalog, usage
+o3c update --check                        # check for an O3C update
+o3c update                                # update O3C itself
 o3c --stop
 ```
 
@@ -278,9 +288,11 @@ bin/o3c.mjs                  cross-platform launcher + preflight
 src/server.mjs               bridge, transport, streaming, catalog, budget
 src/paths.mjs                platform data/state/bin path resolution
 src/preflight.mjs            prerequisite checks and OS install guidance
+src/self-update.mjs          o3c update detection and execution
 scripts/install.mjs          npm installer and shim generator
 scripts/install.sh           Unix compatibility wrapper
 test/preflight.test.mjs      prerequisite and guidance tests
+test/update.test.mjs         self-update action tests
 test/translate.test.mjs      unit tests
 test/install.test.mjs        installer and doctor tests (all OSes)
 test/mock-upstream.mjs       OpenAI-compatible mock (direct transport)

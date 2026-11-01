@@ -14,6 +14,7 @@
   of being merged into one malformed input.
 - Clarify that Claude Code tools are allowed while OpenCode's internal tools are
   not, so models stop treating Bash as forbidden.
+- Add `o3c update` and `o3c update --check` for npm, GitHub and source installs.
 
 ## 0.3.0
 
