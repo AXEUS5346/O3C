@@ -9,6 +9,7 @@ import {
   findOpenCodeAuth,
   formatPrerequisites,
   installGuidance,
+  localNoProxy,
   missingRequired,
   versionMajor,
 } from "../src/preflight.mjs";
@@ -118,6 +119,15 @@ test("requires a Claude Code version with model picker support", () => {
   assert.equal(claude.ok, false);
   assert.match(claude.detail, /2\.1\.242\+ required/);
   assert.match(formatPrerequisites(checks), /Update Claude Code to 2\.1\.242/);
+});
+
+test("adds localhost to NO_PROXY without dropping existing entries", () => {
+  const values = localNoProxy({ NO_PROXY: "example.com,localhost", HTTP_PROXY: "http://proxy" });
+  assert.equal(values.NO_PROXY, values.no_proxy);
+  assert.match(values.NO_PROXY, /example\.com/);
+  assert.match(values.NO_PROXY, /localhost/);
+  assert.match(values.NO_PROXY, /127\.0\.0\.1/);
+  assert.match(values.NO_PROXY, /::1/);
 });
 
 test("detects an existing OpenCode login", () => {

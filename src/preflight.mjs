@@ -79,6 +79,18 @@ export function commandVersion(command, { platform = process.platform, timeout =
   }
 }
 
+export function localNoProxy(env = process.env) {
+  const entries = String(env.NO_PROXY || env.no_proxy || "")
+    .split(/[,\s]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  for (const host of ["127.0.0.1", "localhost", "::1"]) {
+    if (!entries.includes(host)) entries.push(host);
+  }
+  const value = entries.join(",");
+  return { NO_PROXY: value, no_proxy: value };
+}
+
 export function openCodeAuthCandidates({ env = process.env, platform = process.platform, home = os.homedir() } = {}) {
   const dataHomes = [];
   if (env.XDG_DATA_HOME) dataHomes.push(env.XDG_DATA_HOME);

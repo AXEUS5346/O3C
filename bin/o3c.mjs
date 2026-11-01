@@ -12,6 +12,7 @@ import {
   findExecutable,
   formatPrerequisites,
   installGuidance,
+  localNoProxy,
   missingRequired,
 } from "../src/preflight.mjs";
 import { updateSelf } from "../src/self-update.mjs";
@@ -114,6 +115,7 @@ async function startBridge() {
     windowsHide: true,
     env: {
       ...process.env,
+      ...localNoProxy(process.env),
       OPENCODE_FREE_DATA_DIR: DATA_DIR,
       OPENCODE_FREE_BRIDGE_DIR: DATA_DIR,
       OPENCODE_FREE_STATE_DIR: STATE_DIR,
@@ -338,6 +340,7 @@ async function launchClaude(model, args) {
     stdio: "inherit",
     env: {
       ...process.env,
+      ...localNoProxy(process.env),
       ANTHROPIC_BASE_URL: BASE,
       ANTHROPIC_AUTH_TOKEN: "opencode-free",
       ANTHROPIC_MODEL: model.id,
@@ -386,6 +389,11 @@ async function doctor() {
   console.log(`  picker:   ${SETTINGS_FILE} (${picker.count} models)`);
   if (conflicting) {
     console.log(`  warning:  ${conflicting} also defines modelPicker and may override O3C.`);
+  }
+  const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  const noProxy = process.env.NO_PROXY || process.env.no_proxy || "";
+  if (proxy && !/(^|,)\s*(127\.0\.0\.1|localhost|::1)/i.test(noProxy)) {
+    console.log("  warning:  a proxy is set without excluding localhost; O3C adds 127.0.0.1 to NO_PROXY for its children.");
   }
   console.log("");
   console.log(formatPrerequisites(checks));

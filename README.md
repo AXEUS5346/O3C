@@ -138,6 +138,10 @@ own OpenCode TUI/config is untouched.
   bridge. Launch through `o3c`, then check `o3c --status` and `o3c --log`. If
   the bridge is not running, run `o3c --stop` and `o3c --list` and inspect the
   reported error. Do not run plain `claude` with a stale `ANTHROPIC_BASE_URL`.
+  In WSL, a container, or a sandbox, run O3C in the same network namespace as
+  Claude Code; `127.0.0.1` is not shared across namespaces. If a proxy is set,
+  keep `127.0.0.1` and `localhost` in `NO_PROXY` (O3C adds them automatically
+  to its own child processes).
 - **A model says the Bash tool is unavailable**: O3C forwards the complete
   Claude Code tool set. Verify the session was launched with `o3c` and that
   Bash is not denied by Claude Code permissions. Test with
