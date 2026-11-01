@@ -197,6 +197,21 @@ test("text-only stream closes with end_turn", () => {
   );
 });
 
+test("tells models that listed tools are available and should be used", () => {
+  const prompt = buildServicePrompt(
+    {
+      tools: [{ name: "Bash", description: "Run a shell command", input_schema: { type: "object", properties: {} } }],
+      messages: [{ role: "user", content: "inspect the install" }],
+    },
+    "deepseek-v4.1-flash-free",
+  );
+  assert.match(prompt, /You have these Claude Code tools available: Bash/);
+  assert.match(prompt, /Bash is a real, working tool/);
+  assert.match(prompt, /Never claim that Bash or another listed tool is unavailable/);
+  assert.match(prompt, /call the appropriate tool with the JSON protocol/);
+  assert.match(prompt, /Tool results marked without \[tool error\] are successful/);
+});
+
 test("builds the service prompt with tools, system and transcript", () => {
   const prompt = buildServicePrompt(
     {

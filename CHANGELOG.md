@@ -8,6 +8,8 @@
   count in `--doctor`; warn about a conflicting user-settings `modelPicker`.
 - Use `claude-opus-4-6` as the default `behavesAs` profile for wider
   compatibility.
+- Tell free models explicitly that listed Claude Code tools (including Bash)
+  are available and that successful tool results are authoritative.
 
 ## 0.3.0
 

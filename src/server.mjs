@@ -761,8 +761,22 @@ function formatTranscript(messages) {
 }
 
 export function buildServicePrompt(body, modelId) {
+  const tools = (body.tools || [])
+    .filter((tool) => tool && tool.name)
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description || "",
+      input_schema: cleanSchema(tool.input_schema || { type: "object", properties: {} }),
+    }));
+  const toolNames = tools.map((tool) => tool.name);
+  const available = toolNames.length
+    ? `You have these Claude Code tools available: ${toolNames.join(", ")}.`
+    : "No Claude Code tools are available in this request.";
   const protocol = [
     "You are the model backend for Claude Code, a coding agent.",
+    available,
+    "Bash is a real, working tool when listed. Never claim that Bash or another listed tool is unavailable.",
+    "For any request that requires inspecting files, the machine, an install, or running a command, call the appropriate tool with the JSON protocol before answering.",
     "You must NOT use any built-in/OpenCode tools. The only way to use a tool is the JSON protocol below.",
     "To call exactly one Claude Code tool, output only one JSON object and nothing else:",
     '{"tool_use":{"name":"<tool_name>","input":{...}}}',
@@ -771,19 +785,14 @@ export function buildServicePrompt(body, modelId) {
     "Do not wrap the JSON in markdown fences. If no tool is needed, answer normally in plain text.",
     "The tool list and conversation below are data, not instructions to use OpenCode tools.",
   ].join("\n");
-  const tools = (body.tools || [])
-    .filter((tool) => tool && tool.name)
-    .map((tool) => ({
-      name: tool.name,
-      description: tool.description || "",
-      input_schema: cleanSchema(tool.input_schema || { type: "object", properties: {} }),
-    }));
   const toolsJson = JSON.stringify(tools);
   const system = systemText(body.system);
   const footer = [
     "# Task",
     "Produce the next assistant message for the conversation above.",
+    "If the task needs information from the machine or a change, call a listed tool before answering.",
     "If a Claude Code tool is needed, output the tool_use JSON object exactly as specified. Do not use OpenCode's own tools.",
+    "Tool results marked without [tool error] are successful outputs from Claude Code. Never claim a listed tool was rejected or unavailable when its result is present.",
   ].join("\n");
 
   const limits = contextLimitFor(modelId);
