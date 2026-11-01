@@ -1,6 +1,6 @@
 # O3C — OpenCode free models in Claude Code
 
-[Source](https://github.com/AXEUS5346/O3C) · MIT
+[Source](https://github.com/AXEUS5346/O3C) · [npm](https://www.npmjs.com/package/@axeus/o3c) · MIT
 
 A local Anthropic-compatible bridge that lets Claude Code use OpenCode's free
 models with:
@@ -35,21 +35,28 @@ OpenCode login is shown as a warning with `opencode auth login` guidance.
 
 ## Install
 
-Install globally from the public repository (Linux, macOS, Windows):
+Install globally from npm (Linux, macOS, Windows). The package is scoped as
+`@axeus/o3c`; the command it installs is `o3c`.
 
 ```bash
-npm install -g github:AXEUS5346/O3C
+npm install -g @axeus/o3c
+o3c --doctor
 o3c --list
 ```
 
 No clone or extra installer step is needed: npm creates the `o3c` command, and
-the launcher creates its data/state directories on first use. Re-run the same
-command to update. An existing `claude-opencode` shim from an older release is
-migrated automatically by the source installer.
+the launcher creates its data/state directories on first use.
 
-Source checkout (development or custom bin/data/state directories):
+Alternatives:
 
 ```bash
+# Install from the public GitHub repository
+npm install -g github:AXEUS5346/O3C
+
+# Run without a global install
+npx --yes --package @axeus/o3c o3c --list
+
+# Source checkout (development or custom bin/data/state directories)
 git clone https://github.com/AXEUS5346/O3C.git
 cd O3C
 npm run install:o3c
@@ -78,7 +85,9 @@ The source installer creates the runtime directories and prints a PATH hint if
 the bin directory is not on PATH. It does **not** modify
 `~/.claude/settings.json` or `~/.config/opencode`.
 
-Keep a source checkout current with `git pull`.
+Keep a global install current with `npm update -g @axeus/o3c` (or `git pull` in a
+source checkout). An existing `claude-opencode` shim from an older release is
+migrated automatically by the source installer.
 
 Platform data locations:
 
@@ -288,7 +297,7 @@ runtime with mode 0600; no secrets belong in the repository.
 
 ```bash
 o3c --stop
-npm uninstall -g o3c                      # global install
+npm uninstall -g @axeus/o3c               # global install
 npm run install:o3c -- --uninstall        # source checkout shim
 ```
 
