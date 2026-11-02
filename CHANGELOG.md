@@ -7,6 +7,10 @@
   it. Measured 3/3 tool calls delivered versus 1/3 before.
 - Detect third-person planning ("The user wants to install… I should first
   check…"), not just first-person "I'll …", which is how these models narrate.
+- Trace every turn end to end in the bridge log: `request`, `attempt`,
+  `decision`, `response` and `failed` lines share a request id and carry a
+  90-character reply preview, so a stall that was not continued is explainable
+  from one line instead of a guess.
 
 ## 0.3.4
 

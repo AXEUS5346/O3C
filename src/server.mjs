@@ -1211,8 +1211,32 @@ async function handleServiceMessages(body, res) {
   const prompt = buildServicePrompt(body, modelId);
   const estimateInput = estimateTokens(prompt);
   const stream = !!body.stream;
+  const reqId = randomHex(4);
+  const seam = lastMessageHasToolResult(body);
+  const atStart = !transcriptHasToolActivity(body);
+  const action = looksLikeActionRequest(body);
+  trace(reqId, "request", {
+    model: modelId,
+    asked: body.model,
+    stream,
+    tools: (body.tools || []).length,
+    promptChars: prompt.length,
+    seam,
+    atStart,
+    action,
+  });
+  const logAttempt = (n, res, extra = {}) =>
+    trace(reqId, "attempt", {
+      n,
+      ok: res.ok,
+      chars: (res.text || "").length,
+      finish: res.finishReason,
+      error: res.ok ? undefined : res.error,
+      preview: (res.text || "").slice(0, 90),
+      ...extra,
+    });
   logError(
-    `service model=${body.model} -> ${modelId} stream=${stream} tools=${body.tools?.length || 0} promptChars=${prompt.length}`,
+    `req=${reqId} service model=${body.model} -> ${modelId} stream=${stream} tools=${body.tools?.length || 0} promptChars=${prompt.length}`,
   );
 
   let state;
@@ -1330,7 +1354,9 @@ async function handleServiceMessages(body, res) {
       onDelta,
       onAdmitted,
     });
+    logAttempt(1, result);
     if (result.ok && (body.tools || []).length && !result.text.trim()) {
+      trace(reqId, "decision", { action: "empty-retry", reason: "reply had no text" });
       result = await runServicePrompt(state, {
         sessionID,
         prompt: `${prompt}\n\nIMPORTANT: your previous reply was empty. Output either a normal answer or the tool_use JSON object now.`,
@@ -1338,6 +1364,7 @@ async function handleServiceMessages(body, res) {
         onDelta,
         onAdmitted,
       });
+      logAttempt(2, result, { why: "empty-retry" });
     }
 
     const offeredTools = body.tools || [];
@@ -1346,7 +1373,7 @@ async function handleServiceMessages(body, res) {
       const first = filterKnownToolCalls(parsed.toolCalls, offeredTools);
       if (first.dropped.length) {
         const invented = first.dropped.map((call) => call.name);
-        logError(`unknown tool name(s) ${invented.join(", ")}; re-asking once`);
+        trace(reqId, "decision", { action: "unknown-tool-retry", invented, offered: offeredTools.map((tool) => tool.name).filter(Boolean) });
         const retry = await runServicePrompt(state, {
           sessionID,
           prompt: `${prompt}\n\nIMPORTANT: your previous reply called ${invented.map((name) => `"${name}"`).join(", ")}, which is not an available tool. The only tools you have are: ${offeredTools.map((tool) => tool.name).filter(Boolean).join(", ")}. Output the tool_use JSON object using one of those names, or answer normally.`,
@@ -1354,6 +1381,7 @@ async function handleServiceMessages(body, res) {
           onDelta: null,
           onAdmitted: null,
         });
+        logAttempt(3, retry, { why: "unknown-tool-retry" });
         if (retry.ok && retry.text.trim()) {
           const reparsed = parseToolProtocol(retry.text);
           if (reparsed.toolCalls.length) {
@@ -1364,10 +1392,19 @@ async function handleServiceMessages(body, res) {
       }
     }
 
-    if (result.ok && shouldContinueNarration(body, result.text, offeredTools.length, parsed.toolCalls.length)) {
-      logError(
-        `narration without a tool call ${lastMessageHasToolResult(body) ? "after a tool result" : "at task start"}; continuing once model=${modelId}`,
-      );
+    const willContinue = shouldContinueNarration(body, result.text, offeredTools.length, parsed.toolCalls.length);
+    trace(reqId, "decision", {
+      action: "narration-continue",
+      will: willContinue,
+      tools: offeredTools.length,
+      calls: parsed.toolCalls.length,
+      intent: looksLikeUnexecutedPlan(result.text),
+      seam,
+      atStart,
+      actionRequest: action,
+      chars: (result.text || "").length,
+    });
+    if (result.ok && willContinue) {
       const retry = await runServicePrompt(state, {
         sessionID,
         prompt: "Your reply above described a next step but contained no tool_use JSON object, so Claude Code could not run anything. If that step needs a tool, output only its tool_use JSON object now, naming a tool from the list, with no prose and no markdown. If nothing is left to run, answer normally instead.",
@@ -1375,6 +1412,7 @@ async function handleServiceMessages(body, res) {
         onDelta: null,
         onAdmitted: null,
       });
+      logAttempt(4, retry, { why: "narration-continue" });
       if (retry.ok) {
         const reparsed = parseToolProtocol(retry.text || "");
         if (reparsed.toolCalls.length) {
@@ -1392,7 +1430,8 @@ async function handleServiceMessages(body, res) {
     if (!result.ok) {
       const message = String(result.error || "generation failed");
       const isFree = /FreeUsageLimit|Free usage limit/i.test(message);
-      logError(`service prompt failed model=${modelId}: ${message}`);
+      logError(`req=${reqId} service prompt failed model=${modelId}: ${message}`);
+      trace(reqId, "failed", { stage: "prompt", error: message, free: isFree });
       if (isFree) {
         fail(
           429,
@@ -1408,8 +1447,16 @@ async function handleServiceMessages(body, res) {
 
     const text = result.text || "";
     const allowed = filterKnownToolCalls(parsed.toolCalls, offeredTools);
+    trace(reqId, "response", {
+      stop: allowed.kept.length ? "tool_use" : result.finishReason === "length" ? "max_tokens" : "end_turn",
+      blocks: [parsed.text ? "text" : null, ...allowed.kept.map((call) => `tool_use:${call.name}`)].filter(Boolean),
+      dropped: allowed.dropped.map((call) => call.name),
+      in: inputTokens,
+      out: outputTokens,
+      stream,
+    });
     if (allowed.dropped.length) {
-      logError(`dropped call(s) for unlisted tool(s): ${allowed.dropped.map((call) => call.name).join(", ")}`);
+      logError(`req=${reqId} dropped call(s) for unlisted tool(s): ${allowed.dropped.map((call) => call.name).join(", ")}`);
     }
     if (!stream) {
       const message = buildAnthropicMessage(parsed.text, allowed.kept, modelId, estimateInput);
@@ -1456,7 +1503,8 @@ async function handleServiceMessages(body, res) {
   } catch (error) {
     const message = String(error?.message || error);
     const isFree = /FreeUsageLimit|Free usage limit/i.test(message);
-    logError(`service request failed model=${modelId}: ${message}`);
+    logError(`req=${reqId} service request failed model=${modelId}: ${message}`);
+    trace(reqId, "failed", { stage: "request", error: message, free: isFree });
     if (res.writableEnded || controller.signal.aborted) return;
     if (isFree) {
       fail(
@@ -1483,6 +1531,27 @@ function log(...args) {
 
 function logError(...args) {
   console.error(new Date().toISOString(), "[bridge]", ...args);
+}
+
+function traceValue(value) {
+  if (typeof value === "boolean" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.length ? value.map(traceValue).join("|") : "-";
+  const text = String(value ?? "").replace(/\s+/g, " ").replace(/"/g, "'").trim();
+  if (!text) return "-";
+  return text.length > 90 ? `${text.slice(0, 90)}...` : text;
+}
+
+export function traceLine(reqId, event, fields = {}) {
+  const parts = [`req=${traceValue(reqId)}`, `event=${traceValue(event)}`];
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue;
+    parts.push(`${key}=${traceValue(value)}`);
+  }
+  return parts.join(" ");
+}
+
+function trace(reqId, event, fields) {
+  console.error(new Date().toISOString(), "[trace]", traceLine(reqId, event, fields));
 }
 
 function randomHex(bytes) {

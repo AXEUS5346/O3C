@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, filterKnownToolCalls, lastMessageHasToolResult, looksLikeUnexecutedPlan, shouldContinueNarration, transcriptHasToolActivity, looksLikeActionRequest, mapStopReason, cacheUsage } from "../src/server.mjs";
+import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, filterKnownToolCalls, lastMessageHasToolResult, looksLikeUnexecutedPlan, shouldContinueNarration, transcriptHasToolActivity, looksLikeActionRequest, mapStopReason, cacheUsage, traceLine } from "../src/server.mjs";
 
 test("resolves aliases and full ids; unknown Anthropic names fall back to default", () => {
   assert.equal(resolveModel("deepseek"), "deepseek-v4.1-flash-free");
@@ -504,4 +504,29 @@ test("continues a narrated opening turn but leaves finished answers alone", () =
   assert.equal(transcriptHasToolActivity(opening), false);
   assert.equal(transcriptHasToolActivity({}), false);
   assert.equal(shouldContinueNarration(midTask, "I'll check that now.", 13, 0), false, "mid-task without a result seam is not retried");
+});
+
+test("trace lines are single-line, greppable and bounded", () => {
+  const line = traceLine("abcd1234", "request", {
+    model: "glm-5.3-flash-free",
+    seam: true,
+    atStart: false,
+    tools: 13,
+    dropped: [],
+    invented: ["skill", "mods"],
+    omitted: null,
+    preview: 'line one\nline two   with "quotes"',
+  });
+  assert.ok(line.startsWith("req=abcd1234 event=request "), line);
+  assert.ok(!line.includes("\n"), "trace lines must never contain newlines");
+  assert.match(line, /seam=true/);
+  assert.match(line, /atStart=false/);
+  assert.match(line, /tools=13/);
+  assert.match(line, /dropped=-/);
+  assert.match(line, /invented=skill\|mods/);
+  assert.match(line, /preview=line one line two with 'quotes'/);
+  assert.ok(!line.includes("omitted"), "null fields must be dropped");
+  const long = traceLine("x", "attempt", { preview: "z".repeat(200) });
+  assert.match(long, /\.\.\.$/, "long values must be truncated");
+  assert.ok(long.length < 140, `traced line too long: ${long.length}`);
 });

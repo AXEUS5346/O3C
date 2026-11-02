@@ -149,6 +149,38 @@ reply was actually prose — for instance a clarifying question. The continuatio
 prompt is deliberately permissive ("if nothing is left to run, answer normally")
 so those turns end after one retry instead of forcing a tool call.
 
+## End-to-end tracing
+
+Every `/v1/messages` request on the service transport gets a short id and one
+line per stage, written to the bridge log (`o3c --log`) as `[trace]`:
+
+| event | fields | what it answers |
+| --- | --- | --- |
+| `request` | `model asked stream tools promptChars seam atStart action` | what the bridge believed about the turn before generating |
+| `attempt` | `n ok chars finish error preview` | what the model actually returned, first 90 chars |
+| `decision` | `action will ...` | why a retry did or did not happen (`empty-retry`, `unknown-tool-retry`, `narration-continue`) |
+| `response` | `stop blocks dropped in out stream` | what Claude Code was told the turn ended with |
+| `failed` | `stage error free` | where the request died |
+
+`seam` means the inbound message is a tool result, `atStart` means no tool has
+run yet in this conversation, `action` means the request reads as imperative.
+Those three plus `intent` are the whole narration-continue decision, so a stall
+that was *not* continued is explainable from one line.
+
+Worked example, a healthy turn that needed no continuation:
+
+```text
+[trace] req=b9f4b7bc event=attempt n=1 ok=true chars=185 finish=stop preview={"tool_use":{"name":"Bash"...
+[trace] req=b9f4b7bc event=decision action=narration-continue will=false tools=2 calls=1 intent=false seam=false atStart=true actionRequest=true chars=185
+[trace] req=b9f4b7bc event=response stop=tool_use blocks=tool_use:Bash dropped=- in=9763 out=60 stream=true
+```
+
+Reading a stall: `event=attempt` shows the prose the model returned, then
+`event=decision will=false` names the reason. If `will=true` you get a second
+`attempt` with `why=narration-continue` and a `response` showing whether it
+recovered a call. Lines are single-line, quote-free and value-truncated by
+`traceLine`, which is unit-tested so the format cannot silently drift.
+
 ## What Free Claude Code (FCC) does
 
 Source read: `/home/axeus/.local/share/uv/tools/free-claude-code/lib/python3.14/
