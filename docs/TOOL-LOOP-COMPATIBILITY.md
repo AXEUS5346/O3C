@@ -115,6 +115,40 @@ missed stall recovery.
 - Comparison target: Free Claude Code (`Alishahryar1/free-claude-code`), a mature
   proxy for the same problem. See the next section for what transfers.
 
+## The opening-turn gap (0.3.5)
+
+0.3.4 only continued a turn when the inbound message was a `tool_result`. A stall
+on the **first** turn of a task therefore went unrecovered, which is exactly what
+was reported again at 23:43 local: the user asked to install a repo, the model
+answered `"I'll look at that repo to see how it's meant to be installed, then
+install it as a Claude Code skill."` and the turn ended.
+
+Measured opening-turn rate with the seam-only trigger: **1 of 3**. The two misses
+narrated in the **third person**, which the first-person intent regex never
+matches:
+
+- `"The repo is a Claude Code **skill**. The README's install steps for Claude Code are: clone into ~/..."`
+- `"The user wants to install the \"what-if-animation\" skill from a GitHub repo into Claude Code. The rep..."`
+
+The fix separates the two situations, in one exported predicate
+(`shouldContinueNarration`) so it is unit-testable:
+
+- **Tool-result seam** — continue when the reply reads like an unexecuted plan.
+  Length is irrelevant here.
+- **Task start, no tool activity anywhere** — an imperative request ("install",
+  "set up", "fix", "run", …) with zero parsed calls is a stall by definition: the
+  model cannot have done anything, so even a confident `"Installed!"` is false.
+  Continue unconditionally. A non-imperative message still needs plan intent, and
+  long answers to questions are left alone.
+
+Result: **3 of 3** opening turns delivered a call, two of them through the
+continuation (`narration without a tool call at task start` in the bridge log).
+
+The cost is one extra round trip when a user asks for an action and the correct
+reply was actually prose — for instance a clarifying question. The continuation
+prompt is deliberately permissive ("if nothing is left to run, answer normally")
+so those turns end after one retry instead of forcing a tool call.
+
 ## What Free Claude Code (FCC) does
 
 Source read: `/home/axeus/.local/share/uv/tools/free-claude-code/lib/python3.14/

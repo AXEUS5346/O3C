@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.5
+
+- Continue stalled opening turns: when the request asks for an action and the
+  model answers with prose and no tool call, one continuation turn now recovers
+  it. Measured 3/3 tool calls delivered versus 1/3 before.
+- Detect third-person planning ("The user wants to install… I should first
+  check…"), not just first-person "I'll …", which is how these models narrate.
+
 ## 0.3.4
 
 - Continue the turn when a free model narrates a next step instead of calling a

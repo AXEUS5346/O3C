@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, filterKnownToolCalls, lastMessageHasToolResult, looksLikeUnexecutedPlan, mapStopReason, cacheUsage } from "../src/server.mjs";
+import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, filterKnownToolCalls, lastMessageHasToolResult, looksLikeUnexecutedPlan, shouldContinueNarration, transcriptHasToolActivity, looksLikeActionRequest, mapStopReason, cacheUsage } from "../src/server.mjs";
 
 test("resolves aliases and full ids; unknown Anthropic names fall back to default", () => {
   assert.equal(resolveModel("deepseek"), "deepseek-v4.1-flash-free");
@@ -462,4 +462,46 @@ test("detects that the conversation is waiting on a tool result", () => {
     "a later assistant turn means we are not on the tool-result seam",
   );
   assert.equal(lastMessageHasToolResult({}), false);
+});
+
+test("continues a narrated opening turn but leaves finished answers alone", () => {
+  const opening = {
+    messages: [{ role: "user", content: [{ type: "text", text: "install this in claude code https://github.com/kelano86/what-if-animation" }] }],
+  };
+  const narrated = "I'll look at that repo to see how it's meant to be installed, then install it as a Claude Code skill.";
+  assert.equal(shouldContinueNarration(opening, narrated, 13, 0), true, "the opening-turn stall must continue");
+
+  const seam = { messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "ok" }] }] };
+  assert.equal(shouldContinueNarration(seam, "Next step is to move it there.", 13, 0), true, "the tool-result seam must continue");
+  const seamRecap = "I'll now walk through everything this repo ships, every file it touches, and each skill folder it creates, and then I'll copy the whole thing into the skills directory and verify the install afterwards so you can see the finished state and restart if needed.";
+  assert.ok(seamRecap.length > 240, `fixture must exceed the task-start length cap, got ${seamRecap.length}`);
+  assert.equal(shouldContinueNarration(seam, seamRecap, 13, 0), true, "the seam ignores the length rule");
+
+  assert.equal(shouldContinueNarration(opening, narrated, 0, 0), false, "no tools offered");
+  assert.equal(shouldContinueNarration(opening, narrated, 13, 1), false, "a call already parsed");
+  assert.equal(
+    shouldContinueNarration(opening, "The repo is a Claude Code skill. The README install steps are: clone into the skills folder.", 13, 0),
+    true,
+    "third-person narration still stalls an action request",
+  );
+
+  const question = { messages: [{ role: "user", content: [{ type: "text", text: "what does this repo contain?" }] }] };
+  assert.equal(looksLikeActionRequest(question), false);
+  assert.equal(looksLikeActionRequest(opening), true);
+  assert.equal(shouldContinueNarration(question, "The repo contains four skills and a studio app.", 13, 0), false, "no plan intent");
+  const long = "I'll recap everything we covered in this session, list each file that was touched and every command that ran, then walk through the full history of the change along with the follow-ups you asked for earlier in the thread so nothing is left unexplained.";
+  assert.ok(long.length > 240, `fixture must exceed the task-start length cap, got ${long.length}`);
+  assert.equal(shouldContinueNarration(question, long, 13, 0), false, "long answers are left alone at task start");
+  assert.equal(shouldContinueNarration(question, "I'll list the files now.", 13, 0), true, "plan intent still continues even without an action verb");
+
+  const midTask = {
+    messages: [
+      { role: "user", content: [{ type: "text", text: "hi" }] },
+      { role: "assistant", content: [{ type: "tool_use", id: "c1", name: "Bash", input: {} }] },
+    ],
+  };
+  assert.equal(transcriptHasToolActivity(midTask), true);
+  assert.equal(transcriptHasToolActivity(opening), false);
+  assert.equal(transcriptHasToolActivity({}), false);
+  assert.equal(shouldContinueNarration(midTask, "I'll check that now.", 13, 0), false, "mid-task without a result seam is not retried");
 });

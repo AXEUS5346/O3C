@@ -996,6 +996,42 @@ export function lastMessageHasToolResult(body) {
   return last.content.some((block) => block && block.type === "tool_result");
 }
 
+export function transcriptHasToolActivity(body) {
+  for (const message of body?.messages || []) {
+    if (!Array.isArray(message?.content)) continue;
+    for (const block of message.content) {
+      if (block && (block.type === "tool_use" || block.type === "tool_result")) return true;
+    }
+  }
+  return false;
+}
+
+const ACTION_REQUEST =
+  /\b(install|set ?up|configure|add|create|build|fix|repair|run|execute|deploy|update|upgrade|downgrade|remove|delete|uninstall|write|edit|change|refactor|migrate|generate|clone|download|start|stop|restart|test|verify|check|inspect|find|search|open|close)\b/i;
+
+export function looksLikeActionRequest(body) {
+  const messages = body?.messages;
+  if (!Array.isArray(messages) || !messages.length) return false;
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user") return false;
+  const content = last.content;
+  if (typeof content === "string") return ACTION_REQUEST.test(content);
+  if (!Array.isArray(content)) return false;
+  const text = content
+    .filter((block) => block && block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
+  return ACTION_REQUEST.test(text);
+}
+
+export function shouldContinueNarration(body, text, offeredCount, callCount) {
+  if (!offeredCount || callCount) return false;
+  if (lastMessageHasToolResult(body)) return looksLikeUnexecutedPlan(text);
+  if (transcriptHasToolActivity(body)) return false;
+  if (looksLikeActionRequest(body)) return true;
+  return looksLikeUnexecutedPlan(text) && String(text || "").trim().length < 240;
+}
+
 export function filterKnownToolCalls(toolCalls, offered) {
   const names = new Set(
     (Array.isArray(offered) ? offered : []).map((tool) => tool && tool.name).filter(Boolean),
@@ -1328,14 +1364,10 @@ async function handleServiceMessages(body, res) {
       }
     }
 
-    if (
-      result.ok &&
-      offeredTools.length &&
-      !parsed.toolCalls.length &&
-      lastMessageHasToolResult(body) &&
-      looksLikeUnexecutedPlan(result.text)
-    ) {
-      logError(`narration without a tool call after a tool result; continuing once model=${modelId}`);
+    if (result.ok && shouldContinueNarration(body, result.text, offeredTools.length, parsed.toolCalls.length)) {
+      logError(
+        `narration without a tool call ${lastMessageHasToolResult(body) ? "after a tool result" : "at task start"}; continuing once model=${modelId}`,
+      );
       const retry = await runServicePrompt(state, {
         sessionID,
         prompt: "Your reply above described a next step but contained no tool_use JSON object, so Claude Code could not run anything. If that step needs a tool, output only its tool_use JSON object now, naming a tool from the list, with no prose and no markdown. If nothing is left to run, answer normally instead.",
