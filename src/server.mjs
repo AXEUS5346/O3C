@@ -751,8 +751,12 @@ function startCatalogTimers() {
   }, 15 * 60 * 1000).unref();
 }
 
+const NEXT_ACTION_AFTER_TOOL =
+  "\n\nClaude Code already ran that tool and the output above is its result. Reply with either the next tool_use JSON object or the final answer. Never reply with a sentence about a step you have not called.";
+
 function formatTranscript(messages) {
   const out = [];
+  let lastResultAt = -1;
   for (const message of messages || []) {
     if (!message || (message.role !== "user" && message.role !== "assistant")) continue;
     const content = message.content;
@@ -789,9 +793,13 @@ function formatTranscript(messages) {
       out.push(...calls);
     } else {
       if (texts.length) out.push(`User: ${texts.join("\n")}`);
-      out.push(...results);
+      for (const result of results) {
+        out.push(result);
+        lastResultAt = out.length - 1;
+      }
     }
   }
+  if (lastResultAt >= 0) out[lastResultAt] += NEXT_ACTION_AFTER_TOOL;
   return out;
 }
 
@@ -817,6 +825,8 @@ export function buildServicePrompt(body, modelId) {
     "Bash is a real, working Claude Code tool when listed. Never claim that Bash or another listed tool is unavailable.",
     "Tool results are real runtime outputs. If a call fails, correct the input or retry with an exact listed name; do not attribute the failure to the bridge.",
     "For any request that requires inspecting files, the machine, an install, or running a command, call the appropriate tool with the JSON protocol before answering.",
+    "Never announce a step without performing it: if your reply says you will do something, that reply must be the tool_use JSON object for it.",
+    "Call only the tools listed above. A tool you were not given does not exist; never name one that is not listed.",
     "Do not use provider-native function calling or tool_calls. Only the plain-text JSON protocol below is allowed.",
     "To call exactly one Claude Code tool, output only one JSON object and nothing else:",
     '{"tool_use":{"name":"<tool_name>","input":{...}}}',
@@ -835,6 +845,7 @@ export function buildServicePrompt(body, modelId) {
     "If the task needs information from the machine or a change, call a listed tool before answering.",
     "If a Claude Code tool is needed, output the tool_use JSON object exactly as specified. Do not use OpenCode's own tools.",
     "Tool results marked without [tool error] are successful outputs from Claude Code. Never claim a listed tool was rejected or unavailable when its result is present.",
+    "If the conversation ends with a tool result, your reply is either the next tool_use JSON object or the final answer.",
   ].join("\n");
 
   const limits = contextLimitFor(modelId);
@@ -967,6 +978,33 @@ export function parseToolProtocol(raw) {
     }
   }
   return { text, toolCalls: [] };
+}
+
+const UNEXECUTED_PLAN = /\b(i'?ll|i will|let me|going to|now i|next,? i|next step|first,? i|i can|we'?ll)\b/i;
+
+export function looksLikeUnexecutedPlan(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  return UNEXECUTED_PLAN.test(value) || /:\s*$/.test(value);
+}
+
+export function lastMessageHasToolResult(body) {
+  const messages = body?.messages;
+  if (!Array.isArray(messages) || !messages.length) return false;
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || !Array.isArray(last.content)) return false;
+  return last.content.some((block) => block && block.type === "tool_result");
+}
+
+export function filterKnownToolCalls(toolCalls, offered) {
+  const names = new Set(
+    (Array.isArray(offered) ? offered : []).map((tool) => tool && tool.name).filter(Boolean),
+  );
+  if (!names.size) return { kept: toolCalls || [], dropped: [] };
+  const kept = [];
+  const dropped = [];
+  for (const call of toolCalls || []) (names.has(call.name) ? kept : dropped).push(call);
+  return { kept, dropped };
 }
 
 function buildAnthropicMessage(text, toolCalls, modelId, estimateInput) {
@@ -1266,6 +1304,54 @@ async function handleServiceMessages(body, res) {
       });
     }
 
+    const offeredTools = body.tools || [];
+    let parsed = parseToolProtocol(result.ok ? result.text || "" : "");
+    if (result.ok && offeredTools.length && parsed.toolCalls.length) {
+      const first = filterKnownToolCalls(parsed.toolCalls, offeredTools);
+      if (first.dropped.length) {
+        const invented = first.dropped.map((call) => call.name);
+        logError(`unknown tool name(s) ${invented.join(", ")}; re-asking once`);
+        const retry = await runServicePrompt(state, {
+          sessionID,
+          prompt: `${prompt}\n\nIMPORTANT: your previous reply called ${invented.map((name) => `"${name}"`).join(", ")}, which is not an available tool. The only tools you have are: ${offeredTools.map((tool) => tool.name).filter(Boolean).join(", ")}. Output the tool_use JSON object using one of those names, or answer normally.`,
+          signal: controller.signal,
+          onDelta: null,
+          onAdmitted: null,
+        });
+        if (retry.ok && retry.text.trim()) {
+          const reparsed = parseToolProtocol(retry.text);
+          if (reparsed.toolCalls.length) {
+            result = retry;
+            parsed = reparsed;
+          }
+        }
+      }
+    }
+
+    if (
+      result.ok &&
+      offeredTools.length &&
+      !parsed.toolCalls.length &&
+      lastMessageHasToolResult(body) &&
+      looksLikeUnexecutedPlan(result.text)
+    ) {
+      logError(`narration without a tool call after a tool result; continuing once model=${modelId}`);
+      const retry = await runServicePrompt(state, {
+        sessionID,
+        prompt: "Your reply above described a next step but contained no tool_use JSON object, so Claude Code could not run anything. If that step needs a tool, output only its tool_use JSON object now, naming a tool from the list, with no prose and no markdown. If nothing is left to run, answer normally instead.",
+        signal: controller.signal,
+        onDelta: null,
+        onAdmitted: null,
+      });
+      if (retry.ok) {
+        const reparsed = parseToolProtocol(retry.text || "");
+        if (reparsed.toolCalls.length) {
+          parsed = { text: parsed.text, toolCalls: reparsed.toolCalls };
+          result = { ...result, usage: retry.usage || result.usage };
+        }
+      }
+    }
+
     const tokens = result.usage || {};
     const cache = cacheUsage(tokens);
     const inputTokens = tokens.input || estimateInput;
@@ -1289,9 +1375,12 @@ async function handleServiceMessages(body, res) {
     }
 
     const text = result.text || "";
-    const parsed = parseToolProtocol(text);
+    const allowed = filterKnownToolCalls(parsed.toolCalls, offeredTools);
+    if (allowed.dropped.length) {
+      logError(`dropped call(s) for unlisted tool(s): ${allowed.dropped.map((call) => call.name).join(", ")}`);
+    }
     if (!stream) {
-      const message = buildAnthropicMessage(parsed.text, parsed.toolCalls, modelId, estimateInput);
+      const message = buildAnthropicMessage(parsed.text, allowed.kept, modelId, estimateInput);
       message.usage.input_tokens = inputTokens;
       message.usage.output_tokens = outputTokens;
       message.usage.cache_creation_input_tokens = cache.write;
@@ -1301,9 +1390,9 @@ async function handleServiceMessages(body, res) {
     }
 
     const activeWriter = ensureWriter();
-    if (parsed.toolCalls.length) {
+    if (allowed.kept.length) {
       if (textMode !== true && !streamed && parsed.text) activeWriter.text(parsed.text);
-      parsed.toolCalls.forEach((call, index) => {
+      allowed.kept.forEach((call, index) => {
         activeWriter.toolCall({
           index,
           id: call.id,
@@ -1320,7 +1409,9 @@ async function handleServiceMessages(body, res) {
     } else {
       if (textMode !== true) {
         const out = parsed.text || text;
-        if (out) activeWriter.text(out);
+        activeWriter.text(out || " ");
+      } else if (!streamed) {
+        activeWriter.text(" ");
       }
       stopKeepAlive();
       activeWriter.finish(result.finishReason === "length" ? "length" : "stop", {
@@ -1603,14 +1694,14 @@ export function anthropicToOpenAI(body, modelId) {
   return payload;
 }
 
-function mapStopReason(reason, hasToolCalls) {
+export function mapStopReason(reason, hasToolCalls) {
   if (hasToolCalls) return "tool_use";
   switch (reason) {
     case "length":
       return "max_tokens";
     case "tool_calls":
     case "function_call":
-      return "tool_use";
+      return "end_turn";
     case "content_filter":
     case "stop":
     case null:

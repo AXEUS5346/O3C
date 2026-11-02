@@ -1,10 +1,25 @@
 # Changelog
 
-## 0.3.2
+## 0.3.4
+
+- Continue the turn when a free model narrates a next step instead of calling a
+  tool: one silent continuation on the same session, only after a tool result.
+  Measured 3/3 tool calls delivered versus 1/3 before.
+- Attach a next-action directive to the newest tool result and forbid announcing
+  a step without calling it, so tool output no longer reads like user chatter.
+- Reject calls for tools that were never offered, with one bounded re-ask, so
+  Claude Code cannot be handed a nonexistent tool.
+- Never report `tool_use` when no call actually parsed, and pad empty streamed
+  replies so Claude Code always receives a content block.
+
+## 0.3.3
 
 - Give the model explicit Claude Code workflow rules: exact tool names only,
   tools execute in Claude Code, settings/statusline changes use Read/Write/Edit/
   Bash, and tool errors must be corrected rather than narrated as bridge faults.
+
+## 0.3.2
+
 - Forward prompt-cache read/creation usage and keep the cacheable prefix stable.
 - Persist the last main model across launches and route background requests to it.
 - Ban provider-native tool calls and fix multi-tool streaming.

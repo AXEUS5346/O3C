@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, cacheUsage } from "../src/server.mjs";
+import { anthropicToOpenAI, openAIToAnthropic, resolveModel, makeSessionId, createSseWriter, buildServicePrompt, parseToolProtocol, filterKnownToolCalls, lastMessageHasToolResult, looksLikeUnexecutedPlan, mapStopReason, cacheUsage } from "../src/server.mjs";
 
 test("resolves aliases and full ids; unknown Anthropic names fall back to default", () => {
   assert.equal(resolveModel("deepseek"), "deepseek-v4.1-flash-free");
@@ -349,4 +349,117 @@ test("builds dynamic aliases, real limits, new/removed markers", () => {
   assert.equal(cat.byId.get("qwen-4-code-free").context, 262144);
   assert.equal(cat.byId.get("qwen-4-code-free").output, 65536);
   assert.deepEqual(cat.removed.map((r) => r.id), ["gone-free"]);
+});
+
+const ONE_TOOL = {
+  name: "Bash",
+  description: "Run a command",
+  input_schema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+};
+
+test("closes the assistant turn only after the newest tool result", () => {
+  const prompt = buildServicePrompt(
+    {
+      tools: [ONE_TOOL],
+      messages: [
+        { role: "user", content: "install it" },
+        { role: "assistant", content: [{ type: "tool_use", id: "c1", name: "Bash", input: { command: "cat README" } }] },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "README one" }] },
+        { role: "assistant", content: [{ type: "tool_use", id: "c2", name: "Bash", input: { command: "ls" } }] },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "c2", content: "files here" }] },
+      ],
+    },
+    "glm-5.3-flash-free",
+  );
+  const directive = prompt.indexOf("Claude Code already ran that tool");
+  assert.ok(directive >= 0, "missing next-action directive");
+  assert.equal(prompt.lastIndexOf("Claude Code already ran that tool"), directive, "directive must appear exactly once");
+  const newest = prompt.indexOf("files here");
+  const older = prompt.indexOf("README one");
+  assert.ok(newest >= 0 && older >= 0);
+  assert.ok(directive > newest, "directive must follow the newest tool result");
+  assert.ok(newest > older, "newest result must come after the older one");
+});
+
+test("adds no next-action directive when no tool ran", () => {
+  const prompt = buildServicePrompt({ tools: [ONE_TOOL], messages: [{ role: "user", content: "hi" }] }, "glm-5.3-flash-free");
+  assert.doesNotMatch(prompt, /already ran that tool/);
+});
+
+test("bans announcing a step without calling it", () => {
+  const prompt = buildServicePrompt({ tools: [ONE_TOOL], messages: [{ role: "user", content: "install it" }] }, "glm-5.3-flash-free");
+  assert.match(prompt, /Never announce a step without performing it/);
+  assert.match(prompt, /A tool you were not given does not exist/);
+  assert.match(prompt, /your reply is either the next tool_use JSON object or the final answer/);
+});
+
+test("separates calls for offered tools from invented ones", () => {
+  const offered = [{ name: "Bash" }, { name: "Read" }];
+  const calls = [
+    { id: "a", name: "Bash", input: {} },
+    { id: "b", name: "skill", input: {} },
+  ];
+  const out = filterKnownToolCalls(calls, offered);
+  assert.deepEqual(out.kept.map((call) => call.name), ["Bash"]);
+  assert.deepEqual(out.dropped.map((call) => call.name), ["skill"]);
+  assert.deepEqual(filterKnownToolCalls(calls, []).kept, calls, "no tool list must not filter");
+  assert.deepEqual(filterKnownToolCalls(calls, undefined).dropped, []);
+  assert.equal(filterKnownToolCalls(undefined, offered).kept.length, 0);
+});
+
+test("never reports tool_use without a parsed call", () => {
+  assert.equal(mapStopReason("tool_calls", false), "end_turn");
+  assert.equal(mapStopReason("function_call", false), "end_turn");
+  assert.equal(mapStopReason("stop", false), "end_turn");
+  assert.equal(mapStopReason(null, false), "end_turn");
+  assert.equal(mapStopReason("length", false), "max_tokens");
+  assert.equal(mapStopReason("stop", true), "tool_use");
+  assert.equal(mapStopReason("tool_calls", true), "tool_use");
+});
+
+test("flags the narration replies that actually stalled the loop", () => {
+  for (const stalled of [
+    "I'll install the skill into Claude Code's skills directory as the README instructs.",
+    "The repo is a HyperFrames skill pack meant to be installed into `~/.claude/skills/`. I'll install it there:",
+    "The README gives clear install steps. I'll clone the skill into Claude Code's skills directory and verify the install.",
+    "First, I need to check whether the folder already exists.",
+    "The README says install by cloning to ~/.claude/skills/what-if-animation. I already cloned to /tmp/wia. Next step is to move it there.",
+  ]) {
+    assert.ok(looksLikeUnexecutedPlan(stalled), `expected narration flag for: ${stalled}`);
+  }
+  assert.ok(
+    looksLikeUnexecutedPlan("The next step is yours: restart Claude Code and the skill loads."),
+    "hand-off replies are flagged on purpose; the continuation may still answer normally",
+  );
+  for (const final of [
+    "Done. The skill pack is at ~/.claude/skills/what-if-animation; restart Claude Code to load it.",
+    "The repo contains four skills and a studio app. Nothing was installed.",
+    "",
+    "   ",
+  ]) {
+    assert.equal(looksLikeUnexecutedPlan(final), false, `unexpected narration flag for: ${final}`);
+  }
+});
+
+test("detects that the conversation is waiting on a tool result", () => {
+  const waiting = {
+    messages: [
+      { role: "user", content: "install it" },
+      { role: "assistant", content: [{ type: "tool_use", id: "c1", name: "Bash", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "ok" }] },
+    ],
+  };
+  assert.equal(lastMessageHasToolResult(waiting), true);
+  assert.equal(lastMessageHasToolResult({ messages: [{ role: "user", content: "hi" }] }), false);
+  assert.equal(
+    lastMessageHasToolResult({
+      messages: [
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "c1", content: "ok" }] },
+        { role: "assistant", content: [{ type: "text", text: "noted" }] },
+      ],
+    }),
+    false,
+    "a later assistant turn means we are not on the tool-result seam",
+  );
+  assert.equal(lastMessageHasToolResult({}), false);
 });
