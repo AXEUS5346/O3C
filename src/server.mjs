@@ -1076,6 +1076,9 @@ function sseHeaders() {
 }
 
 async function runServicePrompt(state, { sessionID, prompt, signal, onDelta, onAdmitted }) {
+  const tStart = Date.now();
+  let tConnected = null;
+  let tFirstDelta = null;
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal]);
   const response = await fetch(`${state.url}/api/event`, {
@@ -1122,6 +1125,7 @@ async function runServicePrompt(state, { sessionID, prompt, signal, onDelta, onA
     }
     if (!data.sessionID || data.sessionID !== sessionID) return;
     if (type === "session.text.delta" && typeof data.delta === "string") {
+      if (tFirstDelta === null) tFirstDelta = Date.now();
       fullText += data.delta;
       onDelta?.(data.delta);
     } else if (type === "session.text.ended" && typeof data.text === "string") {
@@ -1170,6 +1174,7 @@ async function runServicePrompt(state, { sessionID, prompt, signal, onDelta, onA
   })();
 
   await Promise.race([connected, sleep(8000)]);
+  tConnected = Date.now();
   try {
     await serviceRequest(state, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
       method: "POST",
@@ -1194,7 +1199,18 @@ async function runServicePrompt(state, { sessionID, prompt, signal, onDelta, onA
     await reader.cancel();
   } catch {}
   await readerLoop.catch(() => {});
-  return { ...result, text: fullText || endedText, usage, finishReason, nativeTool };
+  return {
+    ...result,
+    text: fullText || endedText,
+    usage,
+    finishReason,
+    nativeTool,
+    ms: {
+      connect: tConnected - tStart,
+      ttft: tFirstDelta === null ? null : tFirstDelta - tConnected,
+      total: Date.now() - tStart,
+    },
+  };
 }
 
 async function handleServiceMessages(body, res) {
@@ -1232,6 +1248,9 @@ async function handleServiceMessages(body, res) {
       chars: (res.text || "").length,
       finish: res.finishReason,
       error: res.ok ? undefined : res.error,
+      connect: res.ms?.connect,
+      ttft: res.ms?.ttft,
+      gen: res.ms?.total,
       preview: (res.text || "").slice(0, 90),
       ...extra,
     });
@@ -1359,7 +1378,7 @@ async function handleServiceMessages(body, res) {
       trace(reqId, "decision", { action: "empty-retry", reason: "reply had no text" });
       result = await runServicePrompt(state, {
         sessionID,
-        prompt: `${prompt}\n\nIMPORTANT: your previous reply was empty. Output either a normal answer or the tool_use JSON object now.`,
+        prompt: "Your previous reply was empty. Output either a normal answer or the tool_use JSON object now.",
         signal: controller.signal,
         onDelta,
         onAdmitted,
@@ -1376,7 +1395,7 @@ async function handleServiceMessages(body, res) {
         trace(reqId, "decision", { action: "unknown-tool-retry", invented, offered: offeredTools.map((tool) => tool.name).filter(Boolean) });
         const retry = await runServicePrompt(state, {
           sessionID,
-          prompt: `${prompt}\n\nIMPORTANT: your previous reply called ${invented.map((name) => `"${name}"`).join(", ")}, which is not an available tool. The only tools you have are: ${offeredTools.map((tool) => tool.name).filter(Boolean).join(", ")}. Output the tool_use JSON object using one of those names, or answer normally.`,
+          prompt: `Your previous reply called ${invented.map((name) => `"${name}"`).join(", ")}, which is not an available tool. The only tools you have are: ${offeredTools.map((tool) => tool.name).filter(Boolean).join(", ")}. Output the tool_use JSON object using one of those names, or answer normally.`,
           signal: controller.signal,
           onDelta: null,
           onAdmitted: null,

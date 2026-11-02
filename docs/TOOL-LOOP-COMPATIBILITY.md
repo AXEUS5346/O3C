@@ -181,6 +181,34 @@ Reading a stall: `event=attempt` shows the prose the model returned, then
 recovered a call. Lines are single-line, quote-free and value-truncated by
 `traceLine`, which is unit-tested so the format cannot silently drift.
 
+## Latency, measured
+
+From the trace on live traffic (`glm-5.3-flash-free`, service transport):
+
+| stage | observed |
+| --- | --- |
+| `connect` (SSE handshake to the local OpenCode service) | **3 ms** |
+| `ttft` (prompt admitted → first text delta) | **~2.1 s** |
+| `gen` (one full attempt) | **~2.4 s** |
+
+So the handshake and the bridge's own work are noise; the cost is one or more
+model attempts. That makes the retry paths the whole story:
+
+- A continued turn is **two** attempts, roughly 5 s instead of 2.4 s. It replaces
+  a manual "okay" plus a full re-read, so it is still a win when it fires.
+- Until now the empty-reply and unknown-tool retries resent the **entire
+  flattened prompt** (measured at 125,881 chars in one log line) as a second
+  prompt into a session that already contained it. Both now send a single
+  sentence, so a retried turn uploads a sentence instead of re-uploading the
+  conversation.
+- The 8-second `Promise.race([connected, sleep(8000)])` guard never binds in
+  practice: `server.connected` arrives in milliseconds.
+
+Remaining, deliberately not changed without a decision: Claude Code's background
+calls (`stream=false tools=0`) are flattened at up to ~143k characters and routed
+to the main model. Capping them would cut that cost but risks context-compaction
+quality, and rerouting them reverses the deliberate `/model` consistency choice.
+
 ## What Free Claude Code (FCC) does
 
 Source read: `/home/axeus/.local/share/uv/tools/free-claude-code/lib/python3.14/

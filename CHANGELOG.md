@@ -11,6 +11,10 @@
   `decision`, `response` and `failed` lines share a request id and carry a
   90-character reply preview, so a stall that was not continued is explainable
   from one line instead of a guess.
+- Report `connect`, `ttft` and `gen` milliseconds per attempt, and stop resending
+  the whole flattened prompt on retry turns: continuations are now one sentence
+  against the existing session, cutting a retried turn's upstream payload from
+  about 126,000 characters to a line.
 
 ## 0.3.4
 
