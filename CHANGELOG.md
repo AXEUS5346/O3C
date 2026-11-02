@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.5
+## 0.3.6
 
 - Continue stalled opening turns: when the request asks for an action and the
   model answers with prose and no tool call, one continuation turn now recovers
